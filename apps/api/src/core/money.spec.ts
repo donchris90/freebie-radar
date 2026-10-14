@@ -18,6 +18,9 @@ describe('money', () => {
   it('rejects invalid currency codes', () => {
     expect(() => currencyExponent('US')).toThrow(MoneyError);
     expect(() => currencyExponent('US1')).toThrow(MoneyError);
+    expect(() => currencyExponent('ZZZ')).toThrow(MoneyError); // well-formed but not a real currency
+    expect(() => currencyExponent('QQQ')).toThrow(MoneyError);
+    expect(currencyExponent('NGN')).toBe(2);
   });
 
   it('parses decimal strings without floating point error', () => {

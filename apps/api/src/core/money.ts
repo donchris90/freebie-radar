@@ -7,16 +7,16 @@ export const MAX_MINOR = 2_147_483_647; // matches Postgres INT column
 
 export class MoneyError extends Error {}
 
+// Intl.NumberFormat accepts any well-formed 3-letter code, so validate against the runtime's real ISO list.
+let KNOWN_CURRENCIES: Set<string> | null = null;
+
 export function assertCurrency(code: string): string {
   if (typeof code !== 'string' || !/^[A-Za-z]{3}$/.test(code)) {
     throw new MoneyError(`Invalid currency code: ${String(code)}`);
   }
   const upper = code.toUpperCase();
-  try {
-    new Intl.NumberFormat('en', { style: 'currency', currency: upper });
-  } catch {
-    throw new MoneyError(`Unsupported currency code: ${upper}`);
-  }
+  KNOWN_CURRENCIES ??= new Set(Intl.supportedValuesOf('currency'));
+  if (!KNOWN_CURRENCIES.has(upper)) throw new MoneyError(`Unsupported currency code: ${upper}`);
   return upper;
 }
 
