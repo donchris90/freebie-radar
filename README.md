@@ -12,8 +12,10 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 | REST API (auth, listings, seller submissions, feeds, saved, reports, moderation, appeals, alerts, resale, admin) | Done and tested end to end over HTTP, **on the in-memory adapter only** |
 | Prisma schema (`prisma/schema.prisma`, about 30 models) | Written. **Not validated, no migration generated, no Prisma adapter yet** (see Blockers) |
 | Background jobs | Job bodies exist (`runExpiry`, `dispatchPending`) and are triggered by admin endpoints. **BullMQ scheduling is not wired** |
-| Expo mobile app, admin web dashboard | Not started |
-| Image upload to object storage | Not started (listings accept validated `https` image URLs only) |
+| Expo mobile app (`apps/mobile`): Discover, Map/List, Alerts, Saved, Profile, listing detail, sell flow, resale calculator, auth | Written. Type-checks and the Android JS bundle builds. **Never run on a device or simulator** |
+| Admin dashboard (`apps/admin`): overview stats, moderation queue, appeals, audit log, job triggers, role-gated | Written. Type-checks and `vite build` succeeds. Not exercised against a running API in a browser |
+| Image upload to object storage | Not started. The sell screen has no photo picker, and the API accepts validated `https` image URLs only |
+| In-app messaging between buyer and seller | Not started. The listing screen says so and offers "Open original listing" only for external-link listings |
 | Payments, promotions, subscriptions | Not implemented. Tier gating exists for alert limits only |
 | Price history and trends | Not implemented (needs the persistence layer to accumulate observations) |
 
@@ -39,6 +41,21 @@ npx tsc --noEmit                 # type-check
 npm run build && npm start       # production build (needs a persistence adapter, see Blockers)
 npm run start:dev                # local dev with the in-memory adapter
 ```
+
+Mobile (`apps/mobile`) and admin (`apps/admin`):
+
+```
+cd apps/mobile && cp .env.example .env   # set EXPO_PUBLIC_API_URL to a URL your phone can reach
+npx expo start                           # then open in Expo Go or a dev build
+npm run typecheck                        # tsc --noEmit
+npm run bundle:check                     # offline Android JS bundle (EXPO_OFFLINE=1 recommended)
+
+cd apps/admin && cp .env.example .env    # VITE_API_URL
+npm run dev                              # http://localhost:5173 (allowed by CORS_ORIGINS in dev)
+npm run build                            # type-check + production build
+```
+
+To try the admin dashboard locally, register a user, then promote it in the dev process (the in-memory store has no seed); a seeded admin arrives with the Prisma adapter.
 
 Observed in the build sandbox: 142 tests passing, type-check clean, `nest build` succeeds, and production startup is refused for a weak `JWT_SECRET` and for the in-memory store.
 
@@ -83,3 +100,6 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 - Deal scores are computed on read from comparable listings; production should cache scores and maintain `ComparablePriceObservation` rows.
 - No refresh-token flow yet (access tokens only), no email verification or password reset, no user-to-user blocking endpoints.
 - No test has been run against PostgreSQL, Redis or BullMQ.
+- Mobile: not run on a device. The map uses `react-native-maps` (Android release builds need a Google Maps API key; Expo Go on iOS uses Apple Maps). Push registration needs an Expo `projectId` in `app.json` (`extra.eas.projectId`) and a real device; without it the app says push is not configured instead of pretending.
+- Mobile location: one-shot foreground location on request, or a manually geocoded place. There is no background tracking. Manual geocoding uses the platform geocoder and is unverified.
+- The dashboard shows only counts the API actually has. Provider failures, retention, revenue and sponsored-performance panels need the data sources behind them.

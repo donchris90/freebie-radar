@@ -67,6 +67,13 @@ describe('Freebie Radar API', () => {
       expect((await http().get('/health')).body).toEqual({ status: 'ok' });
     });
 
+    it('allows only configured browser origins (CORS)', async () => {
+      const ok = await http().options('/listings').set('Origin', 'http://localhost:5173').set('Access-Control-Request-Method', 'GET');
+      expect(ok.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+      const bad = await http().options('/listings').set('Origin', 'https://evil.example').set('Access-Control-Request-Method', 'GET');
+      expect(bad.headers['access-control-allow-origin']).toBeUndefined();
+    });
+
     it('registers, logs in and returns the profile without secrets', async () => {
       const u = await signup(app);
       const login = await http().post('/auth/login').send({ email: u.email, password: 'correct-horse-battery' });

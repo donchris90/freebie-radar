@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Freebie Radar",
+    "slug": "freebie-radar",
+    "version": "0.1.0",
+    "scheme": "freebieradar",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-location", { "locationWhenInUsePermission": "Freebie Radar uses your location only while the app is open, to show listings near you. You can choose a location manually instead." }],
+      "expo-notifications"
+    ],
+    "ios": { "bundleIdentifier": "com.freebieradar.app", "supportsTablet": false },
+    "android": { "package": "com.freebieradar.app" },
+    "extra": { "apiUrl": "http://localhost:3000" }
+  }
+}

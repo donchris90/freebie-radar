@@ -1,0 +1,29 @@
+:root { --bg:#f5f7f4; --surface:#fff; --ink:#0f1f2b; --muted:#52626e; --line:#dde3e0; --accent:#0b8f5c; --danger:#b42318; --caution:#8a5a00; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-size:15px; line-height:1.5; }
+header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 24px; background:var(--surface); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+header h1 { font-size:18px; margin:0; }
+nav { display:flex; gap:8px; flex-wrap:wrap; }
+button { font:inherit; cursor:pointer; border-radius:10px; border:1px solid var(--line); background:var(--surface); padding:8px 14px; min-height:40px; color:var(--ink); }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+button.danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+button[aria-pressed="true"] { background:var(--ink); color:#fff; border-color:var(--ink); }
+button:disabled { opacity:.5; cursor:not-allowed; }
+main { padding:24px; max-width:1100px; margin:0 auto; display:grid; gap:20px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:18px; }
+.card h2 { font-size:15px; margin:0 0 10px; color:var(--muted); font-weight:600; }
+.big { font-size:34px; font-weight:800; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-size:13px; font-weight:600; }
+.bar { height:8px; background:var(--line); border-radius:99px; overflow:hidden; }
+.bar > span { display:block; height:100%; background:var(--accent); }
+.muted { color:var(--muted); font-size:13px; }
+.err { color:var(--danger); }
+.pill { display:inline-block; padding:2px 10px; border-radius:99px; background:#eef2ef; font-size:12px; font-weight:600; }
+.pill.warn { background:#fff1d6; color:var(--caution); }
+input, textarea { font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:10px; width:100%; background:#fff; }
+label { display:grid; gap:4px; font-size:13px; color:var(--muted); font-weight:600; }
+form { display:grid; gap:12px; max-width:380px; margin:60px auto; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
