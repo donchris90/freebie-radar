@@ -15,6 +15,7 @@ import { AdminCountriesController, CountriesController } from './countries/count
 import { CountriesService } from './countries/countries.service';
 import { createStorage, STORAGE } from './storage/storage';
 import { createMailer, MAILER } from './mail/mailer';
+import { JobsService } from './jobs/jobs.service';
 import { UploadsController } from './storage/uploads.controller';
 import { ListingsController, ListingsService } from './listings/listings';
 
@@ -61,6 +62,7 @@ class HealthController {
     OptionalAuthGuard,
     RolesGuard,
     CountriesService,
+    JobsService,
     AuthService,
     ListingsService,
     AlertsService,

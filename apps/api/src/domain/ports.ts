@@ -80,6 +80,8 @@ export interface TokenRepo {
   bumpCodeAttempts(id: string): Promise<number>;
   /** Atomic: true only for the caller that consumed the code. */
   consumeCode(id: string, at: Date): Promise<boolean>;
+  /** Deletes refresh tokens past their expiry and codes expired for over a day. Returns how many rows went. */
+  purgeExpired(now: Date): Promise<number>;
 }
 
 export interface BlockRepo {

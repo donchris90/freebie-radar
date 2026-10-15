@@ -251,14 +251,38 @@ function Audit() {
   );
 }
 
+interface JobRow { name: string; everyMs: number; nextRunAt: string | null; lastSuccess: { at: string; result: unknown } | null; lastFailure: { at: string; reason: string; attempts: number } | null; stale: boolean }
+
+const every = (ms: number) => (ms >= 3_600_000 ? `${Math.round(ms / 3_600_000)} h` : ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
+
 function Jobs() {
+  const q = useLoad(() => api<{ enabled: boolean; jobs: JobRow[] }>('/admin/jobs/status'), []);
   const [out, setOut] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const run = async (path: string) => { setBusy(true); try { setOut(JSON.stringify(await api(path, { method: 'POST' }))); } catch (e) { setOut((e as Error).message); } finally { setBusy(false); } };
+  const run = async (path: string) => { setBusy(true); try { setOut(JSON.stringify(await api(path, { method: 'POST' }))); q.reload(); } catch (e) { setOut((e as Error).message); } finally { setBusy(false); } };
   return (
     <section className="card">
-      <p className="muted">Manual triggers for the job bodies. Scheduled execution (BullMQ) is not wired yet.</p>
-      <div className="row"><button disabled={busy} onClick={() => run('/admin/jobs/expire')}>Run listing expiry</button><button disabled={busy} onClick={() => run('/admin/jobs/dispatch-alerts')}>Dispatch pending alerts</button></div>
+      <Status {...q} retry={q.reload} />
+      {q.data && !q.data.enabled ? <p className="err" role="alert">Scheduled jobs are off because no Redis is configured. Listings will not expire and deferred alerts will not send on their own. Set REDIS_URL and restart the API.</p> : null}
+      {q.data?.enabled ? (
+        <table>
+          <thead><tr><th>Job</th><th>Runs every</th><th>Last success</th><th>Next run</th><th>Last failure</th><th></th></tr></thead>
+          <tbody>
+            {q.data.jobs.map((j) => (
+              <tr key={j.name}>
+                <td><strong>{j.name}</strong> {j.stale ? <span className="pill warn">not keeping up</span> : <span className="pill on">on schedule</span>}</td>
+                <td>{every(j.everyMs)}</td>
+                <td>{j.lastSuccess ? <>{new Date(j.lastSuccess.at).toLocaleString()}<div className="muted">{j.lastSuccess.result ? JSON.stringify(j.lastSuccess.result) : ''}</div></> : <span className="muted">Not yet</span>}</td>
+                <td>{j.nextRunAt ? new Date(j.nextRunAt).toLocaleTimeString() : <span className="muted">-</span>}</td>
+                <td>{j.lastFailure ? <><span className="err">{j.lastFailure.reason}</span><div className="muted">{new Date(j.lastFailure.at).toLocaleString()} after {j.lastFailure.attempts} tries</div></> : <span className="muted">None recorded</span>}</td>
+                <td><button disabled={busy} onClick={() => run(`/admin/jobs/queue/${j.name}`)}>Run now</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      <p className="muted">Failed runs retry automatically; a run that fails every try is written to the audit log as JOB_FAILED.</p>
+      <div className="row"><button disabled={busy} onClick={() => run('/admin/jobs/expire')}>Run listing expiry directly</button><button disabled={busy} onClick={() => run('/admin/jobs/dispatch-alerts')}>Dispatch pending alerts directly</button></div>
       {out ? <pre role="status">{out}</pre> : null}
     </section>
   );

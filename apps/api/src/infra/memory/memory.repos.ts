@@ -99,6 +99,12 @@ export function createMemoryRepos(): Repos {
         const mine = [...codes.values()].filter((c) => c.userId === userId && c.purpose === purpose).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
         return mine[0] ? clone(mine[0]) : null;
       },
+      async purgeExpired(now) {
+        let n = 0;
+        for (const [id, r] of refresh) if (r.expiresAt < now) { refresh.delete(id); n++; }
+        for (const [id, c] of codes) if (c.expiresAt.getTime() < now.getTime() - 86_400_000) { codes.delete(id); n++; }
+        return n;
+      },
       async bumpCodeAttempts(id) { const c = codes.get(id)!; c.attempts += 1; return c.attempts; },
       async consumeCode(id, at) {
         const c = codes.get(id);

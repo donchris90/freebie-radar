@@ -22,6 +22,7 @@ import { ModerationType, UserRec } from '../domain/models';
 import { REPOS, Repos } from '../domain/ports';
 import { AlertsService } from '../engagement/alerts';
 import { ListingsService } from '../listings/listings';
+import { JobsService } from '../jobs/jobs.service';
 
 export class ModerateDto {
   @IsIn(['REMOVE_LISTING', 'MARK_UNDER_REVIEW', 'RESTORE_LISTING', 'DISMISS_REPORT']) action!: ModerationType;
@@ -56,7 +57,7 @@ const EVENT_FOR: Record<Exclude<ModerationType, 'DISMISS_REPORT'>, LifecycleEven
 
 @Injectable()
 export class ModerationService {
-  constructor(@Inject(REPOS) private readonly repos: Repos, private readonly listings: ListingsService, private readonly alerts: AlertsService) {}
+  constructor(@Inject(REPOS) private readonly repos: Repos, private readonly listings: ListingsService, private readonly alerts: AlertsService, private readonly jobs: JobsService) {}
 
   async queue(q: PageDto) {
     const { items, total } = await this.repos.reports.listByStatus(q.status ?? 'OPEN', q.offset ?? 0, q.limit ?? 25);
@@ -153,6 +154,10 @@ export class ModerationService {
 
   async stats() { return this.repos.stats.stats(); }
   async audit(q: PageDto) { return this.repos.audit.list(q.offset ?? 0, q.limit ?? 50); }
+  jobStatus() { return this.jobs.status(); }
+  async queueJob(name: string) {
+    try { return await this.jobs.runNow(name); } catch (e) { throw new NotFoundException((e as Error).message); }
+  }
   runExpiry() { return this.listings.runExpiry(); }
   dispatchAlerts() { return this.alerts.dispatchPending(); }
 }
@@ -182,6 +187,10 @@ export class AdminController {
   stats() { return this.svc.stats(); }
   @Roles('ADMIN') @Get('admin/audit')
   audit(@Query() q: PageDto) { return this.svc.audit(q); }
+  @Roles('ADMIN') @Get('admin/jobs/status')
+  jobStatus() { return this.svc.jobStatus(); }
+  @Roles('ADMIN') @Post('admin/jobs/queue/:name')
+  queueJob(@Param('name') name: string) { return this.svc.queueJob(name); }
   @Roles('ADMIN') @Post('admin/jobs/expire')
   expire() { return this.svc.runExpiry(); }
   @Roles('ADMIN') @Post('admin/jobs/dispatch-alerts')

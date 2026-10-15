@@ -12,7 +12,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "seed": "ts-node prisma/seed.ts",
-    "test:pg": "node scripts/test-pg.js"
+    "test:pg": "node scripts/test-pg.js",
+    "test:redis": "node scripts/test-redis.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",
@@ -26,11 +27,11 @@
     "@nestjs/throttler": "^6.4.0",
     "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.0",
-    "bullmq": "^5.0.0",
+    "bullmq": "^5.81.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "helmet": "^8.0.0",
-    "ioredis": "^5.4.0",
+    "ioredis": "^5.11.1",
     "nodemailer": "^10.1.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

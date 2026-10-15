@@ -357,6 +357,12 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
         const r = await db.oneTimeCode.findFirst({ where: { userId, purpose }, orderBy: { createdAt: 'desc' } });
         return r ? { id: r.id, userId: r.userId, purpose: r.purpose, codeHash: r.codeHash, attempts: r.attempts, expiresAt: r.expiresAt, usedAt: r.usedAt ?? null, createdAt: r.createdAt } : null;
       },
+      async purgeExpired(now) {
+        // Revoked-but-unexpired refresh tokens stay: replaying one is how token theft is detected.
+        const a = await db.refreshToken.deleteMany({ where: { expiresAt: { lt: now } } });
+        const b = await db.oneTimeCode.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - 86_400_000) } } });
+        return a.count + b.count;
+      },
       async bumpCodeAttempts(id) {
         const r = await db.oneTimeCode.update({ where: { id }, data: { attempts: { increment: 1 } } });
         return r.attempts;

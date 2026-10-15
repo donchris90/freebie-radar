@@ -46,6 +46,8 @@ export interface AppConfig {
   codeResendSeconds: number;
   /** Email delivery. `log` prints messages to the console and is refused in production. */
   mail: { driver: 'log' | 'smtp'; from: string; smtpUrl: string | null };
+  /** Background jobs (listing expiry, alert dispatch, source sync) run on BullMQ when Redis is configured. */
+  jobs: { enabled: boolean; redisUrl: string | null; queueName: string; /** Test hook: run every job at this interval instead of its own. */ intervalOverrideMs: number | null };
   /** When true, only accounts with a verified email can post listings. Defaults to on in production. */
   requireVerifiedEmail: boolean;
   s3: null | { bucket: string; region: string; accessKeyId: string; secretAccessKey: string; publicBaseUrl: string; endpoint: string | null };
@@ -81,6 +83,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('Production needs real email delivery: set SMTP_URL and MAIL_FROM (password reset and verification depend on it)');
   }
   if (nodeEnv === 'production' && !env.MAIL_FROM) throw new Error('MAIL_FROM is required in production');
+  const redisUrl = env.REDIS_URL || null;
+  const jobsEnabled = env.JOBS_ENABLED ? env.JOBS_ENABLED === 'true' : !!redisUrl && nodeEnv !== 'test';
+  if (jobsEnabled && !redisUrl) throw new Error('JOBS_ENABLED=true requires REDIS_URL');
+  if (nodeEnv === 'production' && !jobsEnabled && env.JOBS_ENABLED !== 'false') {
+    throw new Error('Production needs Redis for scheduled jobs: set REDIS_URL (or JOBS_ENABLED=false if a separate process runs them)');
+  }
   const list = (v: string | undefined, d: string[]) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
   return {
     nodeEnv,
@@ -98,6 +106,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     storageDriver: driver,
     uploadDir: env.UPLOAD_DIR ?? resolve(process.cwd(), 'uploads'),
     publicBaseUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/$/, '') : null,
+    jobs: { enabled: jobsEnabled, redisUrl, queueName: env.JOBS_QUEUE_NAME ?? 'freebie-radar-jobs', intervalOverrideMs: env.JOBS_INTERVAL_MS ? int(env.JOBS_INTERVAL_MS, 0) || null : null },
     refreshTtlDays: int(env.REFRESH_TTL_DAYS, 30),
     refreshReuseGraceSeconds: int(env.REFRESH_REUSE_GRACE_SECONDS, 10),
     codeResendSeconds: int(env.CODE_RESEND_SECONDS, 60),
