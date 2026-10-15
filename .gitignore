@@ -7,3 +7,6 @@ coverage
 .expo
 *.log
 uploads/
+
+send/
+*.zip
