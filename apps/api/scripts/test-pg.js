@@ -2,12 +2,12 @@
 //
 //   npm run test:pg
 //
-// Uses TEST_DATABASE_URL if set, otherwise postgresql://postgres:postgres@127.0.0.1:5432/freebie_radar_test.
+// Uses TEST_DATABASE_URL if set, otherwise postgresql://postgres:postgres@127.0.0.1:5434/freebie_radar_test.
 // The database name MUST end in _test: the suite empties every table before it runs.
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
-const url = process.env.TEST_DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5432/freebie_radar_test';
+const url = process.env.TEST_DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5434/freebie_radar_test';
 const dbName = url.split('?')[0].split('/').pop();
 if (!dbName.endsWith('_test')) {
   console.error(`Refusing to run: database "${dbName}" does not end in _test (the suite truncates all tables).`);

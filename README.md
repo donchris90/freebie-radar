@@ -38,7 +38,7 @@ npx tsc --noEmit                 # type-check
 npm run build && npm start       # production build (STORE=prisma, needs PostgreSQL)
 npm run start:dev                # local dev; reads apps/api/.env (STORE=prisma for PostgreSQL, STORE=memory for a quick trial)
 
-docker compose up -d postgres redis
+docker compose up -d postgres redis   # PostgreSQL on host port 5434, Redis on 6381 (avoids clashing with other local projects)
 npx prisma migrate deploy        # apply migrations
 ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a long passphrase' npm run seed   # sources + optional admin
 npm run test:pg                  # the e2e suite against PostgreSQL (creates freebie_radar_test)
