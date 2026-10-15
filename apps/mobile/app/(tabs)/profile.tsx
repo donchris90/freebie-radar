@@ -1,5 +1,4 @@
 import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, ScrollView, Switch, Text, View } from 'react-native';
@@ -19,15 +18,22 @@ export default function Profile() {
   const patch = async (body: object) => { try { await api('/me/preferences', { method: 'PATCH', body }); await refresh(); } catch (e) { Alert.alert('Could not save', (e as ApiError).message); } };
 
   const enablePush = async () => {
+    // Push needs a development build: Expo Go cannot register push tokens (and expo-notifications' native
+    // module is missing there). The module is therefore loaded only here, never at app start.
+    if (Constants.executionEnvironment === 'storeClient') {
+      Alert.alert('Push needs a development build', 'Push notifications do not work inside Expo Go. Alerts will still appear in the Alerts tab.');
+      return;
+    }
     setBusy(true);
     try {
+      const Notifications = await import('expo-notifications');
       const perm = await Notifications.requestPermissionsAsync();
       if (perm.status !== 'granted') { Alert.alert('Notifications are off', 'Allow notifications in your phone settings to receive alerts.'); return; }
       const projectId = (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId;
       if (!projectId) { Alert.alert('Push is not configured', 'This build has no Expo project ID, so a push token cannot be created yet.'); return; }
       const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
       await patch({ pushToken: token, pushEnabled: true });
-    } catch { Alert.alert('Could not enable notifications', 'Please try again.'); } finally { setBusy(false); }
+    } catch { Alert.alert('Could not enable notifications', 'Notifications are not available in this build.'); } finally { setBusy(false); }
   };
 
   if (!user) return (
