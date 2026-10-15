@@ -1,6 +1,14 @@
 import Constants from 'expo-constants';
 
-const BASE: string = process.env.EXPO_PUBLIC_API_URL ?? (Constants.expoConfig?.extra?.apiUrl as string | undefined) ?? 'http://localhost:3000';
+// Development falls back to localhost (works on the simulator and with `adb reverse`); a release build never
+// does, because on a real phone localhost is the phone itself. Misconfiguration surfaces as a clear error instead
+// of a silent "can't reach" screen.
+const fromExtra = Constants.expoConfig?.extra?.apiUrl;
+const CONFIGURED: string | null = process.env.EXPO_PUBLIC_API_URL || (typeof fromExtra === 'string' && fromExtra ? fromExtra : null);
+export const API_CONFIG_ERROR: string | null = CONFIGURED
+  ? (!__DEV__ && !CONFIGURED.startsWith('https://') ? 'This build is configured with a non-HTTPS API address.' : null)
+  : (__DEV__ ? null : 'This build has no API address configured.');
+const BASE: string = CONFIGURED ?? 'http://localhost:3000';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public offline = false) {
@@ -29,6 +37,7 @@ export async function api<T>(path: string, opts: { method?: string; body?: unkno
 }
 
 async function request<T>(path: string, opts: { method?: string; body?: unknown; query?: Query } = {}): Promise<T> {
+  if (API_CONFIG_ERROR) throw new ApiError(0, `${API_CONFIG_ERROR} Reinstall the latest version of the app.`, false);
   const qs = opts.query
     ? '?' + Object.entries(opts.query).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
     : '';

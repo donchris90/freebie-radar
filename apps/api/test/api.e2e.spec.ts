@@ -765,6 +765,63 @@ describe('Freebie Radar API', () => {
     });
   });
 
+
+  describe('boolean filters and the exceptional-deals feed', () => {
+    it('parses freeOnly as true for true/1 and false for false/0, and ignores it when omitted', async () => {
+      const tag = `Flagcheck${uniq()}`;
+      const seller = await signup(app);
+      await makeListing(app, seller.token, { title: `${tag} free lamp`, price: '0' });
+      await makeListing(app, seller.token, { title: `${tag} paid lamp`, price: '30', lat: 40.8 });
+      const total = async (q: object) => (await http().get('/listings').query({ q: tag, ...q })).body.total;
+      expect(await total({})).toBe(2);
+      expect(await total({ freeOnly: 'true' })).toBe(1);
+      expect(await total({ freeOnly: '1' })).toBe(1);
+      expect(await total({ freeOnly: 'TRUE' })).toBe(1);
+      expect(await total({ freeOnly: 'false' })).toBe(2); // used to be read as true
+      expect(await total({ freeOnly: '0' })).toBe(2);
+      expect(await total({ freeOnly: '' })).toBe(2);
+      expect((await http().get('/listings').query({ q: tag, freeOnly: 'yes' })).status).toBe(400);
+      expect((await http().get('/feed/free-near-me').query({ q: tag, lat: 40.7, lng: -74 })).body.total).toBe(1);
+    });
+
+    it('finds deals beyond the first page of search results, ranks them best first, and pages through them', async () => {
+      const cad = { countryCode: 'CA' };
+      const toronto = { lat: 43.65, lng: -79.38, currency: 'CAD', categoryKey: 'garden', condition: 'GOOD' };
+      const bargains: string[] = [];
+      // The bargains are posted first, so they are the OLDEST listings and fall outside the newest 50.
+      for (const [i, price] of ['12', '20'].entries()) {
+        const s = await signup(app, cad);
+        const l = await makeListing(app, s.token, { ...toronto, price, title: `Greenhouse bargain${i} ${uniq()}`, lng: -79.38 + i * 0.01 });
+        bargains.push(l.id);
+      }
+      for (let i = 0; i < 58; i++) {
+        const s = await signup(app, cad);
+        await makeListing(app, s.token, { ...toronto, price: String(100 + (i % 5)), title: `Garden bench ${uniq()} ${'abcdefghij'[i % 10]}${i}`, lng: -79.3 - i * 0.002 });
+      }
+      const all = await http().get('/feed/exceptional-deals').query({ category: 'garden', currency: 'CAD', limit: 50 });
+      expect(all.status).toBe(200);
+      const ids = all.body.items.map((i: { id: string }) => i.id);
+      expect(ids).toEqual(expect.arrayContaining(bargains));
+      expect(all.body.scanned).toBeGreaterThanOrEqual(60);
+      expect(all.body.truncated).toBe(false);
+      const scores = all.body.items.map((i: { dealScore: { score: number } }) => i.dealScore.score);
+      expect([...scores].sort((a, b) => b - a)).toEqual(scores); // best first
+      for (const sc of scores) expect(sc).toBeGreaterThanOrEqual(75);
+
+      // Paging walks the same ranked list without repeats or gaps.
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      for (let guard = 0; guard < 10; guard++) {
+        const page = await http().get('/feed/exceptional-deals').query({ category: 'garden', currency: 'CAD', limit: 1, cursor });
+        seen.push(...page.body.items.map((i: { id: string }) => i.id));
+        cursor = page.body.nextCursor ?? undefined;
+        if (!cursor) break;
+      }
+      expect(seen).toEqual(ids);
+      expect(new Set(seen).size).toBe(seen.length);
+    });
+  });
+
   describe('account safety', () => {
     const NEW_PW = 'a-brand-new-passphrase';
     const OLD_PW = 'correct-horse-battery';

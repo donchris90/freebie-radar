@@ -16,7 +16,8 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { parseBool } from '../common/transform';
 import {
   BadRequestException,
   Body,
@@ -70,7 +71,7 @@ export class CreateListingDto {
 export class SearchDto {
   @IsOptional() @IsString() @MaxLength(100) q?: string;
   @IsOptional() @IsString() category?: string;
-  @IsOptional() @Type(() => Boolean) @IsBoolean() freeOnly?: boolean;
+  @IsOptional() @Transform(({ value }) => parseBool(value)) @IsBoolean() freeOnly?: boolean;
   @IsOptional() @IsString() minPrice?: string;
   @IsOptional() @IsString() maxPrice?: string;
   @IsOptional() @IsString() currency?: string;
@@ -95,6 +96,10 @@ function decodeCursor(c?: string): number {
   }
   throw new BadRequestException('Invalid cursor');
 }
+
+/** How many of the newest matching listings the exceptional-deals feed scores per request. */
+const DEAL_SCAN_CAP = 300;
+const DEAL_SCAN_BATCH = 50;
 
 const SOURCE_NAMES: Record<string, string> = { direct: 'Posted on Freebie Radar', 'external-link': 'Link shared by a user' };
 
@@ -318,10 +323,47 @@ export class ListingsService {
     return this.search({ ...q, freeOnly: true, sort: 'nearest' }, viewer);
   }
 
+  /**
+   * Exceptional deals are ranked across a scan of the newest matching listings, not just the first page of
+   * search results: every candidate is scored, those at or above `minScore` are sorted best first, and
+   * `limit`/`cursor` page through that ranked list. The scan is capped (see DEAL_SCAN_CAP) and the response
+   * says when it was cut short. Production should replace this with stored scores.
+   */
   async exceptionalDeals(q: SearchDto, viewer?: UserRec, minScore = 75) {
-    const page = await this.search({ ...q, limit: 50, cursor: undefined }, viewer);
-    const items = page.items.filter((i) => i.dealScore && i.dealScore.score >= minScore).sort((a, b) => b.dealScore!.score - a.dealScore!.score);
-    return { items, note: 'Only listings with enough comparable-price evidence can have a Deal Score.' };
+    const unit = q.unit ?? viewer?.prefs.distanceUnit ?? 'km';
+    const center = this.resolveCenter(q, viewer);
+    const ctx: ViewCtx = { viewer, center, unit, now: new Date() };
+    const blocked = viewer ? await this.repos.blocks.blockedIds(viewer.id) : [];
+    const dismissed = viewer ? new Set(await this.repos.saved.dismissedIds(viewer.id)) : new Set<string>();
+    const qualifying: Awaited<ReturnType<ListingsService['toPublic']>>[] = [];
+    let scanned = 0;
+    let total = 0;
+    while (scanned < DEAL_SCAN_CAP) {
+      const filter = this.buildFilter({ ...q, limit: DEAL_SCAN_BATCH, cursor: encodeCursor(scanned) }, viewer, center);
+      const { items, total: t } = await this.repos.listings.search({ ...filter, excludeSellerIds: blocked });
+      total = t;
+      if (!items.length) break;
+      for (const l of items) {
+        if (dismissed.has(l.id)) continue;
+        const view = await this.toPublic(l, ctx);
+        if (view.dealScore && view.dealScore.score >= minScore) qualifying.push(view);
+      }
+      scanned += items.length;
+      if (scanned >= total) break;
+    }
+    qualifying.sort((a, b) => b.dealScore!.score - a.dealScore!.score || a.id.localeCompare(b.id));
+    const limit = q.limit ?? 20;
+    const start = decodeCursor(q.cursor);
+    const items = qualifying.slice(start, start + limit);
+    const next = start + limit;
+    return {
+      items,
+      total: qualifying.length,
+      nextCursor: next < qualifying.length ? encodeCursor(next) : null,
+      scanned,
+      truncated: scanned < total,
+      note: 'Only listings with enough comparable-price evidence can have a Deal Score.',
+    };
   }
 
   async recommended(viewer: UserRec, q: SearchDto) {

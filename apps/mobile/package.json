@@ -6,7 +6,9 @@
   "scripts": {
     "start": "expo start",
     "typecheck": "tsc --noEmit",
-    "bundle:check": "expo export --platform android --output-dir .export-check"
+    "bundle:check": "expo export --platform android --output-dir .export-check",
+    "eas-build-pre-install": "node scripts/check-release-config.js",
+    "check:release": "node scripts/check-release-config.js"
   },
   "dependencies": {
     "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
