@@ -1,0 +1,13 @@
+{
+  "name": "freebie-radar",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "api:dev": "npm run start:dev -w apps/api",
+    "api:test": "npm test -w apps/api",
+    "api:build": "npm run build -w apps/api",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

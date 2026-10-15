@@ -1,0 +1,110 @@
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useState } from 'react';
+import { Alert, Image, Linking, Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { api, ApiError, ListingView, titleCase } from '../../src/api';
+import { useAuth } from '../../src/auth';
+import { Button, Chip, ErrorState, LoadingState } from '../../src/components/ui';
+import { useSaved } from '../../src/saved';
+import { colors, radius, space, type } from '../../src/theme';
+import { useAsync } from '../../src/useAsync';
+
+const REASONS = [['UNAVAILABLE', 'No longer available'], ['EXPIRED', 'Expired'], ['SUSPICIOUS', 'Looks suspicious'], ['SCAM', 'Possible scam'], ['DUPLICATE', 'Duplicate'], ['PROHIBITED_ITEM', 'Prohibited item'], ['WRONG_INFO', 'Wrong information'], ['OTHER', 'Something else']] as const;
+
+export default function ListingDetail() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
+  const { ids, toggle } = useSaved();
+  const { width } = useWindowDimensions();
+  const state = useAsync(() => api<ListingView>(`/listings/${id}`), [id, user?.id]);
+  const [reporting, setReporting] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (state.loading && !state.data) return <LoadingState />;
+  if (state.error) return state.error instanceof ApiError && state.error.status === 404
+    ? <ErrorState error={new Error('This listing is no longer available.')} />
+    : <ErrorState error={state.error} onRetry={state.reload} />;
+  const l = state.data!;
+  const saved = ids.has(l.id);
+
+  const guard = async (fn: () => Promise<unknown>, ok?: string) => {
+    if (!user) { router.push('/login'); return; }
+    setBusy(true);
+    try { await fn(); if (ok) Alert.alert(ok); state.reload(); } catch (e) { Alert.alert('Something went wrong', (e as ApiError).message); } finally { setBusy(false); }
+  };
+  const openOriginal = () => Alert.alert('Open the original listing?', 'This leaves Freebie Radar and opens a page we do not control or verify.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Open', onPress: () => void Linking.openURL(l.externalUrl!) }]);
+
+  return (
+    <ScrollView contentContainerStyle={{ paddingBottom: space.xl * 2 }}>
+      {l.images.length ? (
+        <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>{l.images.map((u) => <Image key={u} source={{ uri: u }} style={{ width, height: 260, backgroundColor: '#E8EDEA' }} accessibilityIgnoresInvertColors />)}</ScrollView>
+      ) : <View style={{ height: 140, backgroundColor: '#E8EDEA', alignItems: 'center', justifyContent: 'center' }}><Text style={type.small}>No photos provided</Text></View>}
+
+      <View style={{ padding: space.lg, gap: space.md }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+          {l.sponsored ? <Chip tone="sponsored" label="Sponsored" /> : null}
+          {l.price.isFree ? <Chip tone="free" label="Free" /> : null}
+          <Chip label={titleCase(l.condition)} />
+          <Chip label={titleCase(l.category)} />
+        </View>
+        <Text style={type.title}>{l.title}</Text>
+        <Text style={{ fontSize: 26, fontWeight: '800', color: l.price.isFree ? colors.accent : colors.ink }}>{l.price.label}</Text>
+        <Text style={[type.body, l.freshness.stale && { color: colors.caution }]} accessibilityLiveRegion="polite">{l.freshness.label}</Text>
+        {l.status === 'POSSIBLY_EXPIRED' ? <Text style={[type.small, { color: colors.caution }]}>We have not had a recent confirmation that this is still available.</Text> : null}
+
+        {l.dealScore ? (
+          <View style={{ backgroundColor: colors.dealSoft, borderRadius: radius.lg, padding: space.lg, gap: 6 }}>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.deal }}>{l.dealScore.score}<Text style={{ fontSize: 16 }}>/100</Text></Text>
+            <Text style={type.body}>{l.dealScore.explanation}</Text>
+            <Text style={type.small}>Based on {l.dealScore.evidence.sampleSize} comparable listings{l.dealScore.evidence.range ? ` (${l.dealScore.evidence.range})` : ''}.</Text>
+            {l.dealScore.evidence.limitations.map((x) => <Text key={x} style={type.small}>• {x}</Text>)}
+          </View>
+        ) : <View style={{ backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, borderWidth: 1, borderColor: colors.line }}><Text style={type.label}>Deal Score</Text><Text style={type.body}>{l.dealScoreNote ?? 'Not enough comparable listings to score this one.'}</Text></View>}
+
+        <View style={{ gap: 4 }}>
+          <Text style={type.h2}>Description</Text>
+          <Text style={type.body}>{l.description || 'The seller did not add a description.'}</Text>
+        </View>
+
+        <View style={{ gap: 4 }}>
+          <Text style={type.h2}>Location</Text>
+          <Text style={type.body}>{[l.location.label, l.distance?.label].filter(Boolean).join(' · ') || 'Approximate area only'}</Text>
+          <Text style={type.small}>The exact address is never shown. Arrange a pickup point with the seller.</Text>
+        </View>
+
+        <View style={{ gap: 4 }}>
+          <Text style={type.h2}>Source</Text>
+          <Text style={type.body}>{l.source.name}</Text>
+          <Text style={type.small}>Not independently verified by Freebie Radar.</Text>
+        </View>
+
+        <View style={{ backgroundColor: l.risk.level === 'NO_MAJOR_SIGNALS' ? colors.surface : colors.cautionSoft, borderRadius: radius.lg, padding: space.lg, gap: 4, borderWidth: 1, borderColor: colors.line }}>
+          <Text style={type.h2}>{l.risk.label}</Text>
+          {l.risk.signals.map((x) => <Text key={x} style={type.body}>• {x}</Text>)}
+          {l.risk.level === 'NO_MAJOR_SIGNALS' ? <Text style={type.small}>This is not a guarantee. Always take sensible precautions.</Text> : null}
+        </View>
+
+        {l.safetyGuidance ? <View style={{ gap: 4 }}><Text style={type.h2}>Stay safe</Text>{l.safetyGuidance.map((x) => <Text key={x} style={type.body}>• {x}</Text>)}</View> : null}
+
+        <View style={{ gap: space.sm }}>
+          {l.externalUrl ? <Button title="Open original listing" onPress={openOriginal} /> : <Text style={type.small}>Messaging sellers inside the app is not available yet.</Text>}
+          <Button title={saved ? 'Saved ✓ (tap to remove)' : 'Save listing'} kind="secondary" busy={busy} onPress={() => guard(() => toggle(l.id))} />
+          {l.price.minor !== null ? <Button title="Estimate resale profit" kind="secondary" onPress={() => router.push({ pathname: '/resale', params: { purchase: String(l.price.minor! / 100), currency: l.price.currency } })} /> : null}
+          {l.isOwner ? <>
+            <Button title="Still available — confirm" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/confirm`, { method: 'POST' }), 'Thanks, availability confirmed.')} />
+            <Button title="Mark as unavailable" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/unavailable`, { method: 'POST' }), 'Marked as unavailable.')} />
+          </> : <Button title="Report this listing" kind="secondary" onPress={() => (user ? setReporting(true) : router.push('/login'))} />}
+        </View>
+      </View>
+
+      <Modal visible={reporting} transparent animationType="slide" onRequestClose={() => setReporting(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(15,31,43,0.45)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: colors.bg, padding: space.xl, gap: space.md, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg }}>
+            <Text style={type.h2}>What is wrong with this listing?</Text>
+            {REASONS.map(([k, label]) => <Pressable key={k} accessibilityRole="button" onPress={async () => { setReporting(false); await guard(() => api(`/listings/${l.id}/report`, { body: { reason: k } }), 'Thanks. Your report helps keep listings accurate.'); }} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={type.body}>{label}</Text></Pressable>)}
+            <Button title="Cancel" kind="secondary" onPress={() => setReporting(false)} />
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
+  );
+}
