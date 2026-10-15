@@ -11,7 +11,7 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 | Provider framework with bounded backoff (`src/providers`) | Done and tested |
 | REST API (auth, listings, seller submissions, feeds, saved, reports, moderation, appeals, alerts, resale, admin) | Done and tested end to end over HTTP, **on the in-memory adapter only** |
 | Prisma schema (`prisma/schema.prisma`, about 30 models) | Validated and migrated (`init`) on PostgreSQL 16 by the owner |
-| Prisma adapter (`src/infra/prisma`), seed (`prisma/seed.ts`) | Written against the same `Repos` ports. **Observed by the owner: the 43 HTTP end-to-end tests pass against PostgreSQL 16** (`npm run test:pg`) |
+| Prisma adapter (`src/infra/prisma`), seed (`prisma/seed.ts`) | Written against the same `Repos` ports. **Observed by the owner: the 52 HTTP end-to-end tests (including countries and photo upload) pass against PostgreSQL 16** (`npm run test:pg`) |
 | Background jobs | Job bodies exist (`runExpiry`, `dispatchPending`) and are triggered by admin endpoints. **BullMQ scheduling is not wired** |
 | Expo mobile app (`apps/mobile`): Discover, Map/List, Alerts, Saved, Profile, listing detail, sell flow, resale calculator, auth | Written. Type-checks and the Android JS bundle builds. **Never run on a device or simulator** |
 | Admin dashboard (`apps/admin`): overview stats, moderation queue, appeals, audit log, job triggers, role-gated | Written. Type-checks and `vite build` succeeds. Not exercised against a running API in a browser |
