@@ -14,7 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { randomUUID } from 'crypto';
 import { CurrentUser, JwtAuthGuard, Roles, RolesGuard } from '../auth/auth';
 import { canTransition, LifecycleEvent, transition } from '../core/lifecycle';
@@ -23,6 +23,7 @@ import { REPOS, Repos } from '../domain/ports';
 import { AlertsService } from '../engagement/alerts';
 import { ListingsService } from '../listings/listings';
 import { JobsService } from '../jobs/jobs.service';
+import { SyncService } from '../sync/sync.service';
 
 export class ModerateDto {
   @IsIn(['REMOVE_LISTING', 'MARK_UNDER_REVIEW', 'RESTORE_LISTING', 'DISMISS_REPORT']) action!: ModerationType;
@@ -35,6 +36,9 @@ export class AppealDto {
 export class ResolveAppealDto {
   @IsIn(['UPHELD', 'REJECTED']) decision!: 'UPHELD' | 'REJECTED';
   @IsString() @Length(3, 500) note!: string;
+}
+export class SourceEnabledDto {
+  @IsBoolean() enabled!: boolean;
 }
 export class UserStatusDto {
   @IsIn(['ACTIVE', 'SUSPENDED']) status!: 'ACTIVE' | 'SUSPENDED';
@@ -57,7 +61,7 @@ const EVENT_FOR: Record<Exclude<ModerationType, 'DISMISS_REPORT'>, LifecycleEven
 
 @Injectable()
 export class ModerationService {
-  constructor(@Inject(REPOS) private readonly repos: Repos, private readonly listings: ListingsService, private readonly alerts: AlertsService, private readonly jobs: JobsService) {}
+  constructor(@Inject(REPOS) private readonly repos: Repos, private readonly listings: ListingsService, private readonly alerts: AlertsService, private readonly jobs: JobsService, private readonly sync: SyncService) {}
 
   async queue(q: PageDto) {
     const { items, total } = await this.repos.reports.listByStatus(q.status ?? 'OPEN', q.offset ?? 0, q.limit ?? 25);
@@ -158,6 +162,21 @@ export class ModerationService {
   async queueJob(name: string) {
     try { return await this.jobs.runNow(name); } catch (e) { throw new NotFoundException((e as Error).message); }
   }
+  sources() { return this.sync.overview(); }
+  async sourceRuns(key: string) {
+    if (!(await this.repos.sources.get(key))) throw new NotFoundException('Unknown source');
+    return { items: await this.repos.syncRuns.recent(key, 20) };
+  }
+  /** Switching a partner source on is a deliberate act: it publishes that partner's listings. */
+  async setSourceEnabled(admin: UserRec, key: string, dto: SourceEnabledDto) {
+    const src = await this.repos.sources.get(key);
+    if (!src || src.kind !== 'API_PROVIDER') throw new NotFoundException('Unknown source');
+    if (dto.enabled && !src.permissionNote) throw new BadRequestException('Record the written permission for this source first (PARTNER_FEED_<KEY>_PERMISSION_NOTE) before switching it on.');
+    await this.repos.sources.setEnabled(key, dto.enabled);
+    await this.repos.audit.add({ id: randomUUID(), actorId: admin.id, action: dto.enabled ? 'SOURCE_ENABLED' : 'SOURCE_DISABLED', entityType: 'Source', entityId: key, metadata: {}, createdAt: new Date() });
+    return (await this.sync.overview()).find((x) => x.key === key);
+  }
+  syncSourceNow(key: string) { return this.sync.syncSource(key); }
   runExpiry() { return this.listings.runExpiry(); }
   dispatchAlerts() { return this.alerts.dispatchPending(); }
 }
@@ -191,6 +210,14 @@ export class AdminController {
   jobStatus() { return this.svc.jobStatus(); }
   @Roles('ADMIN') @Post('admin/jobs/queue/:name')
   queueJob(@Param('name') name: string) { return this.svc.queueJob(name); }
+  @Roles('ADMIN') @Get('admin/sources')
+  sources() { return this.svc.sources(); }
+  @Roles('ADMIN') @Get('admin/sources/:key/runs')
+  sourceRuns(@Param('key') key: string) { return this.svc.sourceRuns(key); }
+  @Roles('ADMIN') @Post('admin/sources/:key/enabled')
+  sourceEnabled(@CurrentUser() u: UserRec, @Param('key') key: string, @Body() dto: SourceEnabledDto) { return this.svc.setSourceEnabled(u, key, dto); }
+  @Roles('ADMIN') @Post('admin/sources/:key/sync')
+  sourceSync(@Param('key') key: string) { return this.svc.syncSourceNow(key); }
   @Roles('ADMIN') @Post('admin/jobs/expire')
   expire() { return this.svc.runExpiry(); }
   @Roles('ADMIN') @Post('admin/jobs/dispatch-alerts')

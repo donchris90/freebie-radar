@@ -43,7 +43,7 @@ import { evaluateExpiry, freshnessLabel, isPubliclyListed, transition, Lifecycle
 import { assertCurrency, formatMinor, formatPriceLabel, MoneyError, parseMajorToMinor } from '../core/money';
 import { assessRisk, RISK_LABELS, SAFETY_GUIDANCE } from '../core/risk';
 import { scoreDeal } from '../core/scoring';
-import { CONDITIONS, Condition, ListingRec, UserRec } from '../domain/models';
+import { CONDITIONS, Condition, ListingRec, SourceRec, UserRec } from '../domain/models';
 import { REPOS, Repos } from '../domain/ports';
 import { AlertsService } from '../engagement/alerts';
 
@@ -305,8 +305,11 @@ export class ListingsService {
   async runExpiry(now = new Date()) {
     let expired = 0;
     let retired = 0;
+    // Partner sources carry their own freshness settings (editable per source); built-in sources use the static rules.
+    const partner = new Map((await this.repos.sources.list()).filter((x) => x.kind === 'API_PROVIDER').map((x) => [x.key, x]));
     for (const l of await this.repos.listings.listForExpiry()) {
-      const rule = EXPIRY_RULES[l.sourceKey] ?? DEFAULT_RULE;
+      const src = partner.get(l.sourceKey);
+      const rule = src ? { expireAfterHours: src.expireAfterHours, retireAfterHours: src.retireAfterHours } : EXPIRY_RULES[l.sourceKey] ?? DEFAULT_RULE;
       const ev = evaluateExpiry({ status: l.status, lastConfirmedAt: l.lastConfirmedAt, expiresAt: l.expiresAt }, rule, now);
       if (!ev) continue;
       const next = transition(l.status, ev);
@@ -449,6 +452,7 @@ export class ListingsService {
       { distanceKm: km, now: ctx.now },
     );
     const fresh = freshnessLabel(ctx.now, l.postedAt, l.lastConfirmedAt, l.status, locale);
+    const src = (await this.sourceInfo()).get(l.sourceKey);
     const ev = score.evidence;
     return {
       id: l.id,
@@ -459,7 +463,13 @@ export class ListingsService {
       price: { minor: l.priceMinor, currency: l.currency, label: formatPriceLabel(l.priceMinor, l.currency, locale), isFree: l.isFree && l.priceMinor === 0 },
       location: { ...approx, label: l.locationLabel, precision: 'approximate' as const },
       distance: km === null ? null : { km: Math.round(km * 10) / 10, label: formatDistance(km, unit, locale) },
-      source: { key: l.sourceKey, name: SOURCE_NAMES[l.sourceKey] ?? l.sourceKey, verified: false },
+      source: {
+        key: l.sourceKey,
+        name: SOURCE_NAMES[l.sourceKey] ?? src?.name ?? l.sourceKey,
+        verified: false,
+        // Shown wherever a partner's listing appears; the partner's agreement says how it must be credited.
+        attribution: src?.kind === 'API_PROVIDER' ? { text: src.attribution, url: src.attributionUrl } : null,
+      },
       freshness: fresh,
       status: l.status,
       risk: { level: l.riskLevel, label: RISK_LABELS[l.riskLevel], signals: l.riskSignals.map((s) => s.message) },
@@ -475,6 +485,14 @@ export class ListingsService {
       externalUrl: l.externalUrl,
       contactMethod: l.contactMethod,
     };
+  }
+
+  private sourceCache: { at: number; byKey: Map<string, SourceRec> } | null = null;
+  private async sourceInfo(): Promise<Map<string, SourceRec>> {
+    if (this.sourceCache && Date.now() - this.sourceCache.at < 30_000) return this.sourceCache.byKey;
+    const byKey = new Map((await this.repos.sources.list()).map((x) => [x.key, x]));
+    this.sourceCache = { at: Date.now(), byKey };
+    return byKey;
   }
 
   private async toOwnerView(l: ListingRec, ctx: ViewCtx) {

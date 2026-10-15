@@ -45,6 +45,8 @@ export interface FetchParams {
 export interface ProviderPage {
   items: NormalizedListing[];
   nextCursor: string | null;
+  /** Items the source sent that failed validation and were left out. */
+  rejected?: number;
 }
 
 export interface ListingProvider {
@@ -137,6 +139,7 @@ export interface SyncOutcome {
   items: NormalizedListing[];
   attempts: number;
   message?: string;
+  rejected?: number;
 }
 
 /** Fetches one page, converting every failure mode into an explicit state. Never returns fake items. */
@@ -152,7 +155,7 @@ export async function fetchPageSafely(
     return { state: 'COUNTRY_UNSUPPORTED', items: [], attempts: 0, message: `${provider.name} is not available in ${params.countryCode}` };
   }
   const r = await runWithBackoff(() => provider.fetchListings(params), opts);
-  if (r.ok && r.value) return { state: 'OK', items: r.value.items, nextCursor: r.value.nextCursor, attempts: r.attempts };
+  if (r.ok && r.value) return { state: 'OK', items: r.value.items, nextCursor: r.value.nextCursor, attempts: r.attempts, rejected: r.value.rejected ?? 0 };
   const state: SyncState = r.failure === 'NOT_CONFIGURED' ? 'NOT_CONFIGURED' : r.failure === 'RATE_LIMITED' ? 'RATE_LIMITED' : 'FAILED';
   return { state, items: [], attempts: r.attempts, message: r.error?.message };
 }

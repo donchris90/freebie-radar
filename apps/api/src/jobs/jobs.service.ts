@@ -6,8 +6,6 @@ import { AlertsService } from '../engagement/alerts';
 import { ListingsService } from '../listings/listings';
 import { JobDef, JobRunner, JobStatus } from './runner';
 
-export const SYNC_RUNNER = Symbol('SYNC_RUNNER');
-
 /** Owns the schedule. Starts with the app when Redis is configured; stops cleanly on shutdown. */
 @Injectable()
 export class JobsService implements OnApplicationBootstrap, OnApplicationShutdown {

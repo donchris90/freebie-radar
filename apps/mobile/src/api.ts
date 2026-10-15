@@ -102,7 +102,7 @@ export interface ListingView {
   price: { minor: number | null; currency: string; label: string; isFree: boolean };
   location: { lat: number; lng: number; label: string | null; precision: 'approximate' };
   distance: { km: number; label: string } | null;
-  source: { key: string; name: string; verified: boolean };
+  source: { key: string; name: string; verified: boolean; attribution?: { text: string | null; url: string | null } | null };
   freshness: { label: string; ageHours: number; stale: boolean };
   status: string;
   risk: { level: 'NO_MAJOR_SIGNALS' | 'EXERCISE_CAUTION' | 'UNDER_REVIEW'; label: string; signals: string[] };

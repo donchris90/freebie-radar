@@ -17,6 +17,20 @@ export const DEFAULT_CATEGORIES = [
   'other',
 ];
 
+export interface PartnerFeedConfig {
+  key: string;
+  name: string;
+  url: string;
+  apiKey: string | null;
+  countries: string[];
+  attribution: string;
+  attributionUrl: string | null;
+  permissionNote: string | null;
+  expireAfterHours: number;
+  retireAfterHours: number;
+  rateLimitPerMinute: number | null;
+}
+
 export interface AppConfig {
   nodeEnv: string;
   jwtSecret: string;
@@ -48,6 +62,10 @@ export interface AppConfig {
   mail: { driver: 'log' | 'smtp'; from: string; smtpUrl: string | null };
   /** Background jobs (listing expiry, alert dispatch, source sync) run on BullMQ when Redis is configured. */
   jobs: { enabled: boolean; redisUrl: string | null; queueName: string; /** Test hook: run every job at this interval instead of its own. */ intervalOverrideMs: number | null };
+  /** Partner listing feeds (see docs/LISTING_SOURCES.md). Each one is read from PARTNER_FEED_<KEY>_* variables. */
+  partnerFeeds: PartnerFeedConfig[];
+  /** Sync tuning. */
+  sync: { everyMs: number; pageSize: number; maxPages: number; maxRunMs: number };
   /** When true, only accounts with a verified email can post listings. Defaults to on in production. */
   requireVerifiedEmail: boolean;
   s3: null | { bucket: string; region: string; accessKeyId: string; secretAccessKey: string; publicBaseUrl: string; endpoint: string | null };
@@ -89,6 +107,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (nodeEnv === 'production' && !jobsEnabled && env.JOBS_ENABLED !== 'false') {
     throw new Error('Production needs Redis for scheduled jobs: set REDIS_URL (or JOBS_ENABLED=false if a separate process runs them)');
   }
+  const feedKeys = (env.PARTNER_FEEDS ?? '').split(',').map((k) => k.trim().toLowerCase()).filter(Boolean);
+  const partnerFeeds = feedKeys.map((key): PartnerFeedConfig => {
+    if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(key) || key === 'direct' || key === 'external-link') throw new Error(`PARTNER_FEEDS: "${key}" is not a valid source key`);
+    const p = `PARTNER_FEED_${key.toUpperCase().replace(/-/g, '_')}_`;
+    const url = env[`${p}URL`];
+    if (!url) throw new Error(`${p}URL is required for partner feed "${key}"`);
+    if (!/^https:\/\//i.test(url) && !(nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:|\/)/i.test(url))) {
+      throw new Error(`${p}URL must be an https URL`);
+    }
+    const attribution = env[`${p}ATTRIBUTION`];
+    if (!attribution) throw new Error(`${p}ATTRIBUTION is required: say how listings from "${key}" must be credited`);
+    return {
+      key,
+      name: env[`${p}NAME`] ?? key,
+      url,
+      apiKey: env[`${p}API_KEY`] ?? null,
+      countries: (env[`${p}COUNTRIES`] ?? '').split(',').map((c) => c.trim().toUpperCase()).filter(Boolean),
+      attribution,
+      attributionUrl: env[`${p}ATTRIBUTION_URL`] ?? null,
+      permissionNote: env[`${p}PERMISSION_NOTE`] ?? null,
+      expireAfterHours: int(env[`${p}EXPIRE_HOURS`], 48),
+      retireAfterHours: int(env[`${p}RETIRE_HOURS`], 72),
+      rateLimitPerMinute: env[`${p}RATE_LIMIT_PER_MINUTE`] ? int(env[`${p}RATE_LIMIT_PER_MINUTE`], 0) || null : null,
+    };
+  });
   const list = (v: string | undefined, d: string[]) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
   return {
     nodeEnv,
@@ -107,6 +150,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     uploadDir: env.UPLOAD_DIR ?? resolve(process.cwd(), 'uploads'),
     publicBaseUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/$/, '') : null,
     jobs: { enabled: jobsEnabled, redisUrl, queueName: env.JOBS_QUEUE_NAME ?? 'freebie-radar-jobs', intervalOverrideMs: env.JOBS_INTERVAL_MS ? int(env.JOBS_INTERVAL_MS, 0) || null : null },
+    partnerFeeds,
+    sync: { everyMs: int(env.SYNC_INTERVAL_MINUTES, 60) * 60_000, pageSize: int(env.SYNC_PAGE_SIZE, 100), maxPages: int(env.SYNC_MAX_PAGES, 50), maxRunMs: int(env.SYNC_MAX_RUN_SECONDS, 240) * 1000 },
     refreshTtlDays: int(env.REFRESH_TTL_DAYS, 30),
     refreshReuseGraceSeconds: int(env.REFRESH_REUSE_GRACE_SECONDS, 10),
     codeResendSeconds: int(env.CODE_RESEND_SECONDS, 60),

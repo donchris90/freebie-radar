@@ -16,6 +16,8 @@ import type {
   ReportRec,
   ResaleRec,
   UserPrefs,
+  SourceRec,
+  SyncRunRec,
   UserRec,
 } from '../../domain/models';
 import type { ListingSearchFilter, Repos } from '../../domain/ports';
@@ -125,6 +127,34 @@ function toListing(r: Row): ListingRec {
     expiresAt: r.expiresAt ?? null,
   };
 }
+
+const toSource = (r: Row): SourceRec => ({
+  key: r.key,
+  name: r.name,
+  kind: r.kind,
+  enabled: r.enabled,
+  countries: r.countries ?? [],
+  expireAfterHours: r.expireAfterHours,
+  retireAfterHours: r.retireAfterHours,
+  recheckIntervalHours: r.recheckIntervalHours ?? null,
+  rateLimitPerMinute: r.rateLimitPerMinute ?? null,
+  attribution: r.attribution ?? null,
+  attributionUrl: r.attributionUrl ?? null,
+  permissionNote: r.permissionNote ?? null,
+});
+
+const toSyncRun = (r: Row): SyncRunRec => ({
+  id: r.id,
+  sourceKey: r.source.key,
+  startedAt: r.startedAt,
+  finishedAt: r.finishedAt ?? null,
+  status: r.status,
+  fetched: r.fetched,
+  created: r.created,
+  updated: r.updated,
+  rejected: r.rejected,
+  errorMessage: r.errorMessage ?? null,
+});
 
 const toReport = (r: Row): ReportRec => ({
   id: r.id,
@@ -625,12 +655,75 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
           observedAt: c.postedAt,
         }));
       },
+      async findBySourceExternal(sourceKey, externalId) {
+        const row = await db.listing.findFirst({ where: { externalId, source: { key: sourceKey } }, include: LISTING_INCLUDE });
+        return row ? toListing(row) : null;
+      },
       async listForExpiry() {
         const rows: Row[] = await db.listing.findMany({
           where: { status: { in: [...EXPIRY_STATUSES] } },
           include: LISTING_INCLUDE,
         });
         return rows.map(toListing);
+      },
+    },
+
+    sources: {
+      async list() {
+        const rows: Row[] = await db.listingSource.findMany({ orderBy: { key: 'asc' } });
+        return rows.map(toSource);
+      },
+      async get(key) {
+        const row = await db.listingSource.findUnique({ where: { key } });
+        return row ? toSource(row) : null;
+      },
+      async upsertConfig(rec) {
+        const fields = {
+          name: rec.name,
+          kind: rec.kind,
+          countries: rec.countries,
+          expireAfterHours: rec.expireAfterHours,
+          retireAfterHours: rec.retireAfterHours,
+          recheckIntervalHours: rec.recheckIntervalHours,
+          rateLimitPerMinute: rec.rateLimitPerMinute,
+          attribution: rec.attribution,
+          attributionUrl: rec.attributionUrl,
+          permissionNote: rec.permissionNote,
+        };
+        // `enabled` is only set when the row is first created; afterwards the admin dashboard owns it.
+        const row = await db.listingSource.upsert({ where: { key: rec.key }, create: { key: rec.key, enabled: rec.enabled, ...fields }, update: fields });
+        return toSource(row);
+      },
+      async setEnabled(key, enabled) {
+        try {
+          return toSource(await db.listingSource.update({ where: { key }, data: { enabled } }));
+        } catch (e) {
+          if (isNotFound(e)) return null;
+          throw e;
+        }
+      },
+    },
+
+    syncRuns: {
+      async start(r) {
+        const sourceId = await sourceIdFor(r.sourceKey);
+        await db.providerSyncRun.create({ data: { id: r.id, sourceId, startedAt: r.startedAt, status: r.status, fetched: r.fetched, created: r.created, updated: r.updated, rejected: r.rejected, errorMessage: r.errorMessage } });
+      },
+      async finish(id, patch, at) {
+        await db.providerSyncRun.update({ where: { id }, data: { ...patch, finishedAt: at } });
+      },
+      async recent(sourceKey, limit) {
+        const rows: Row[] = await db.providerSyncRun.findMany({
+          where: sourceKey ? { source: { key: sourceKey } } : {},
+          include: { source: true },
+          orderBy: { startedAt: 'desc' },
+          take: limit,
+        });
+        return rows.map(toSyncRun);
+      },
+      async lastOkStartedAt(sourceKey) {
+        const row = await db.providerSyncRun.findFirst({ where: { status: 'OK', source: { key: sourceKey } }, orderBy: { startedAt: 'desc' }, select: { startedAt: true } });
+        return row ? row.startedAt : null;
       },
     },
 

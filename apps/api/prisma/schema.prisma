@@ -257,6 +257,9 @@ model ListingSource {
   recheckIntervalHours Int? // null = provider does not permit/support recheck
   rateLimitPerMinute Int?
   attribution   String?    // required display text/link rules
+  attributionUrl String?   // where the attribution text links to
+  retireAfterHours Int     @default(168) // extra hours a possibly-expired listing stays visible
+  permissionNote String?   // the written basis on which we may use this feed (contract, terms, API licence)
   createdAt     DateTime   @default(now())
   listings      Listing[]
   syncRuns      ProviderSyncRun[]
@@ -271,6 +274,7 @@ model ProviderSyncRun {
   fetched     Int      @default(0)
   created     Int      @default(0)
   updated     Int      @default(0)
+  rejected    Int      @default(0) // items the feed sent that failed validation and were not stored
   errorMessage String?
   source      ListingSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 

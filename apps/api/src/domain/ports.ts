@@ -17,6 +17,8 @@ import type {
   ReportReason,
   ReportStatus,
   ResaleRec,
+  SourceRec,
+  SyncRunRec,
   UserRec,
 } from './models';
 
@@ -57,6 +59,23 @@ export interface ListingRepo {
   countSameContentBySeller(sellerId: string, hash: string, since: Date): Promise<number>;
   comparablesFor(l: ListingRec): Promise<Comparable[]>;
   listForExpiry(): Promise<ListingRec[]>;
+  findBySourceExternal(sourceKey: string, externalId: string): Promise<ListingRec | null>;
+}
+
+export interface SourceRepo {
+  list(): Promise<SourceRec[]>;
+  get(key: string): Promise<SourceRec | null>;
+  /** Creates the source or refreshes its descriptive and freshness settings. Never changes `enabled`. */
+  upsertConfig(rec: SourceRec): Promise<SourceRec>;
+  setEnabled(key: string, enabled: boolean): Promise<SourceRec | null>;
+}
+
+export interface SyncRunRepo {
+  start(r: SyncRunRec): Promise<void>;
+  finish(id: string, patch: Partial<Pick<SyncRunRec, 'status' | 'fetched' | 'created' | 'updated' | 'rejected' | 'errorMessage'>>, at: Date): Promise<void>;
+  recent(sourceKey: string | null, limit: number): Promise<SyncRunRec[]>;
+  /** Start time of the newest run that finished OK, for incremental fetches. */
+  lastOkStartedAt(sourceKey: string): Promise<Date | null>;
 }
 
 export interface UserRepo {
@@ -175,6 +194,8 @@ export interface Repos {
   tokens: TokenRepo;
   blocks: BlockRepo;
   listings: ListingRepo;
+  sources: SourceRepo;
+  syncRuns: SyncRunRepo;
   saved: SavedRepo;
   reports: ReportRepo;
   alerts: AlertRepo;

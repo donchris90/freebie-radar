@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setRefreshToken, setToken, signOut, Stats } from './api';
 
-type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'jobs';
+type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'sources' | 'jobs';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -288,6 +288,42 @@ function Jobs() {
   );
 }
 
+interface SourceRow {
+  key: string; name: string; enabled: boolean; configured: boolean; setup: string | null; countries: string[];
+  attribution: string | null; permissionNote: string | null; expireAfterHours: number; retireAfterHours: number;
+  lastOkAt: string | null; lastRun: { status: string; fetched: number; created: number; updated: number; rejected: number; errorMessage: string | null; startedAt: string } | null;
+}
+
+function Sources() {
+  const q = useLoad(() => api<SourceRow[]>('/admin/sources'), []);
+  const [out, setOut] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const act = async (fn: () => Promise<unknown>) => { setBusy(true); setOut(null); try { const r = await fn(); setOut(JSON.stringify(r)); q.reload(); } catch (e) { setOut((e as Error).message); } finally { setBusy(false); } };
+  return (
+    <section className="card">
+      <Status {...q} retry={q.reload} />
+      {q.data && q.data.length === 0 ? <p className="muted">No partner feeds are configured. Set PARTNER_FEEDS and the PARTNER_FEED_&lt;KEY&gt;_* variables on the API (see docs/LISTING_SOURCES.md). Until then only listings posted by people appear.</p> : null}
+      {q.data?.map((s) => (
+        <div className="item" key={s.key}>
+          <div className="row inline"><strong>{s.name}</strong> <span className="muted">{s.key}</span>
+            {s.enabled ? <span className="pill on">on</span> : <span className="pill">off</span>}
+            {!s.configured ? <span className="pill warn">not configured</span> : null}
+          </div>
+          {s.setup ? <p className="err">{s.setup}</p> : null}
+          <p className="muted">Countries: {s.countries.length ? s.countries.join(', ') : 'all enabled'} · listings expire after {s.expireAfterHours}h unconfirmed, retired {s.retireAfterHours}h later · credit shown: {s.attribution ?? 'none'}</p>
+          <p className="muted">Permission on file: {s.permissionNote ?? <span className="err">none recorded, cannot be switched on</span>}</p>
+          <p className="muted">{s.lastRun ? <>Last run {new Date(s.lastRun.startedAt).toLocaleString()}: <strong>{s.lastRun.status}</strong> · fetched {s.lastRun.fetched}, new {s.lastRun.created}, refreshed {s.lastRun.updated}, rejected {s.lastRun.rejected}{s.lastRun.errorMessage ? <> · <span className="err">{s.lastRun.errorMessage}</span></> : null}</> : 'Never run.'}{s.lastOkAt ? <> Last fully successful run: {new Date(s.lastOkAt).toLocaleString()}.</> : null}</p>
+          <div className="row">
+            <button disabled={busy || (!s.enabled && !s.permissionNote)} onClick={() => act(() => api(`/admin/sources/${s.key}/enabled`, { method: 'POST', body: { enabled: !s.enabled } }))}>{s.enabled ? 'Switch off' : 'Switch on'}</button>
+            <button disabled={busy || !s.enabled} onClick={() => act(() => api(`/admin/sources/${s.key}/sync`, { method: 'POST' }))}>Sync now</button>
+          </div>
+        </div>
+      ))}
+      {out ? <pre role="status">{out}</pre> : null}
+    </section>
+  );
+}
+
 function Mark() {
   return <span className="mark" aria-hidden="true"><i /><b /></span>;
 }
@@ -338,7 +374,7 @@ export function App() {
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
-  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['sources', 'Sources', isAdmin], ['jobs', 'Jobs', isAdmin]];
   const visible = tabs.filter(([, , show]) => show);
   const current = visible.find(([k]) => k === tab)?.[1] ?? '';
   return (
@@ -360,6 +396,7 @@ export function App() {
         {tab === 'users' && isAdmin ? <Users /> : null}
         {tab === 'countries' && isAdmin ? <Countries /> : null}
         {tab === 'audit' && isAdmin ? <Audit /> : null}
+        {tab === 'sources' && isAdmin ? <Sources /> : null}
         {tab === 'jobs' && isAdmin ? <Jobs /> : null}
       </main>
     </div>

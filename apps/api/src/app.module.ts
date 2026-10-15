@@ -16,6 +16,8 @@ import { CountriesService } from './countries/countries.service';
 import { createStorage, STORAGE } from './storage/storage';
 import { createMailer, MAILER } from './mail/mailer';
 import { JobsService } from './jobs/jobs.service';
+import { JsonFeedProvider } from './providers/json-feed';
+import { RegisteredSource, SOURCES, SyncService } from './sync/sync.service';
 import { UploadsController } from './storage/uploads.controller';
 import { ListingsController, ListingsService } from './listings/listings';
 
@@ -62,7 +64,16 @@ class HealthController {
     OptionalAuthGuard,
     RolesGuard,
     CountriesService,
+    {
+      provide: SOURCES,
+      useFactory: (): RegisteredSource[] =>
+        config.partnerFeeds.map((f) => ({
+          provider: new JsonFeedProvider({ key: f.key, name: f.name, url: f.url, apiKey: f.apiKey, countries: f.countries, categories: config.categories }),
+          defaults: { key: f.key, name: f.name, kind: 'API_PROVIDER', countries: f.countries, expireAfterHours: f.expireAfterHours, retireAfterHours: f.retireAfterHours, recheckIntervalHours: null, rateLimitPerMinute: f.rateLimitPerMinute, attribution: f.attribution, attributionUrl: f.attributionUrl, permissionNote: f.permissionNote },
+        })),
+    },
     JobsService,
+    SyncService,
     AuthService,
     ListingsService,
     AlertsService,

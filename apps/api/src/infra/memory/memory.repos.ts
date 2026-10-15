@@ -15,6 +15,8 @@ import type {
   RefreshRec,
   ReportRec,
   ResaleRec,
+  SourceRec,
+  SyncRunRec,
   UserRec,
 } from '../../domain/models';
 import type { ListingSearchFilter, Repos } from '../../domain/ports';
@@ -37,6 +39,8 @@ export function createMemoryRepos(): Repos {
   const deliveries = new Map<string, DeliveryRec>();
   const resale = new Map<string, ResaleRec>();
   const audit: AuditRec[] = [];
+  const sources = new Map<string, SourceRec>();
+  const syncRuns: SyncRunRec[] = [];
   const moderation = new Map<string, ModerationRec>();
   const appeals = new Map<string, AppealRec>();
   const countries = new Map<string, CountryRec>();
@@ -201,8 +205,44 @@ export function createMemoryRepos(): Repos {
             observedAt: c.postedAt,
           }));
       },
+      async findBySourceExternal(sourceKey, externalId) {
+        const l = [...listings.values()].find((x) => x.sourceKey === sourceKey && x.externalId === externalId);
+        return l ? clone(l) : null;
+      },
       async listForExpiry() {
         return [...listings.values()].filter((l) => l.status === 'ACTIVE' || l.status === 'POSSIBLY_EXPIRED' || l.status === 'REPORTED_UNAVAILABLE').map(clone);
+      },
+    },
+
+    sources: {
+      async list() { return [...sources.values()].sort((a, b) => a.key.localeCompare(b.key)).map(clone); },
+      async get(key) { const r = sources.get(key); return r ? clone(r) : null; },
+      async upsertConfig(rec) {
+        const cur = sources.get(rec.key);
+        const next = { ...clone(rec), enabled: cur ? cur.enabled : rec.enabled };
+        sources.set(rec.key, next);
+        return clone(next);
+      },
+      async setEnabled(key, enabled) {
+        const r = sources.get(key);
+        if (!r) return null;
+        r.enabled = enabled;
+        return clone(r);
+      },
+    },
+
+    syncRuns: {
+      async start(r) { syncRuns.push(clone(r)); },
+      async finish(id, patch, at) {
+        const r = syncRuns.find((x) => x.id === id);
+        if (r) Object.assign(r, patch, { finishedAt: at });
+      },
+      async recent(sourceKey, limit) {
+        return syncRuns.filter((r) => !sourceKey || r.sourceKey === sourceKey).sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime()).slice(0, limit).map(clone);
+      },
+      async lastOkStartedAt(sourceKey) {
+        const ok = syncRuns.filter((r) => r.sourceKey === sourceKey && r.status === 'OK').sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
+        return ok[0] ? ok[0].startedAt : null;
       },
     },
 

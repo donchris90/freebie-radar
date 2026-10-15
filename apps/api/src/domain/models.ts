@@ -209,3 +209,34 @@ export interface CountryRec {
   defaultTimeZone: string;
   enabled: boolean;
 }
+
+export interface SourceRec {
+  key: string;
+  name: string;
+  kind: 'DIRECT_SUBMISSION' | 'EXTERNAL_LINK' | 'API_PROVIDER';
+  enabled: boolean;
+  /** Empty = every enabled country the provider supports. */
+  countries: string[];
+  expireAfterHours: number;
+  retireAfterHours: number;
+  recheckIntervalHours: number | null;
+  rateLimitPerMinute: number | null;
+  attribution: string | null;
+  attributionUrl: string | null;
+  permissionNote: string | null;
+}
+
+export type SyncStatus = 'RUNNING' | 'OK' | 'PARTIAL' | 'FAILED' | 'RATE_LIMITED' | 'NOT_CONFIGURED' | 'SKIPPED';
+
+export interface SyncRunRec {
+  id: string;
+  sourceKey: string;
+  startedAt: Date;
+  finishedAt: Date | null;
+  status: SyncStatus;
+  fetched: number;
+  created: number;
+  updated: number;
+  rejected: number;
+  errorMessage: string | null;
+}

@@ -79,7 +79,8 @@ export default function ListingDetail() {
 
         <View style={{ gap: 4 }}>
           <Text style={type.h2}>Source</Text>
-          <Text style={type.body}>{l.source.name}</Text>
+          <Text style={type.body}>{l.source.attribution?.text || l.source.name}</Text>
+          {l.source.attribution?.url ? <Text style={[type.small, { color: colors.accent, textDecorationLine: 'underline' }]} accessibilityRole="link" onPress={() => void Linking.openURL(l.source.attribution!.url!)}>{l.source.attribution.url.replace(/^https?:\/\//, '')}</Text> : null}
           <Text style={type.small}>Not independently verified by Freebie Radar.</Text>
         </View>
 
