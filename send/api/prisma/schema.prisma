@@ -1,0 +1,649 @@
+// Freebie Radar data model.
+//
+// Schema decisions (see README "Architecture"):
+// - Money is stored as integer MINOR units (cents, pence, kobo) + ISO 4217 currency. Never floats.
+// - Coordinates are stored as lat/lng doubles with a composite index; radius search uses a
+//   bounding-box prefilter + haversine refinement. PostGIS is an optional later upgrade.
+// - Listing exact coordinates are never exposed publicly; the API returns a rounded/jittered
+//   approximate location (approxLat/approxLng).
+// - All timestamps are UTC (timestamptz); rendering uses the user's chosen IANA time zone.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  BUSINESS
+  MODERATOR
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum ItemCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+  POOR
+  FOR_PARTS
+  UNKNOWN
+}
+
+enum ListingStatus {
+  ACTIVE
+  POSSIBLY_EXPIRED
+  REPORTED_UNAVAILABLE
+  CONFIRMED_UNAVAILABLE
+  REMOVED
+  UNDER_REVIEW
+}
+
+enum RiskLevel {
+  NO_MAJOR_SIGNALS
+  EXERCISE_CAUTION
+  UNDER_REVIEW
+}
+
+enum SourceKind {
+  DIRECT_SUBMISSION
+  EXTERNAL_LINK
+  API_PROVIDER
+}
+
+enum ContactMethod {
+  IN_APP
+  EMAIL_RELAY
+  EXTERNAL_LINK
+}
+
+enum ReportReason {
+  EXPIRED
+  UNAVAILABLE
+  SUSPICIOUS
+  SCAM
+  DUPLICATE
+  PROHIBITED_ITEM
+  WRONG_INFO
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  IN_REVIEW
+  ACTIONED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  APPROVE
+  REMOVE_LISTING
+  MARK_UNDER_REVIEW
+  RESTORE_LISTING
+  WARN_USER
+  SUSPEND_USER
+  DISMISS_REPORT
+  APPEAL_UPHELD
+  APPEAL_REJECTED
+}
+
+enum AppealStatus {
+  PENDING
+  UPHELD
+  REJECTED
+}
+
+enum AlertFrequency {
+  IMMEDIATE
+  HOURLY_DIGEST
+  DAILY_DIGEST
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED_LIMIT
+  SKIPPED_PREFERENCES
+}
+
+enum PromotionStatus {
+  DRAFT
+  PENDING_PAYMENT
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  NONE
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum AvailabilityEventType {
+  CREATED
+  PROVIDER_REFRESH
+  SELLER_CONFIRMED
+  USER_REPORTED_UNAVAILABLE
+  AUTO_EXPIRED
+  RECHECK_OK
+  RECHECK_GONE
+  REMOVED
+  RESTORED
+  UNDER_REVIEW
+}
+
+model User {
+  id               String        @id @default(uuid())
+  email            String        @unique
+  passwordHash     String
+  displayName      String
+  role             UserRole      @default(USER)
+  status           AccountStatus @default(ACTIVE)
+  countryCode      String        @default("US") @db.Char(2)
+  timeZone         String        @default("UTC")
+  locale           String        @default("en-US")
+  pushToken        String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
+
+  preference       UserPreference?
+  sellerProfile    SellerProfile?
+  businessAccount  BusinessAccount?
+  subscription     Subscription?
+  refreshTokens    RefreshToken[]
+  listings         Listing[]
+  savedListings    SavedListing[]
+  savedSearches    SavedSearch[]
+  alertSubs        AlertSubscription[]
+  reports          ListingReport[]       @relation("reporter")
+  blocksMade       UserBlock[]           @relation("blocker")
+  blocksReceived   UserBlock[]           @relation("blocked")
+  calculations     ResaleCalculation[]
+  dismissals       ListingDismissal[]
+  interactions     CategoryInteraction[]
+  appeals          Appeal[]
+  auditLogs        AuditLog[]            @relation("actor")
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model UserPreference {
+  userId                    String   @id
+  distanceUnit              String   @default("mi") // "mi" | "km"
+  homeLabel                 String?  // user-chosen label, e.g. "Brooklyn, NY"
+  homeLat                   Float?   // approximate by default (rounded); user may opt for precise
+  homeLng                   Float?
+  locationPrecision         String   @default("approximate") // "approximate" | "precise" | "manual"
+  searchRadiusKm            Float    @default(16)
+  personalisationEnabled    Boolean  @default(true)
+  quietHoursStart           Int?     // local hour 0-23
+  quietHoursEnd             Int?
+  maxPushPerDay             Int      @default(10)
+  pushEnabled               Boolean  @default(true)
+  likedCategories           String[] @default([])
+  updatedAt                 DateTime @updatedAt
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ListingSource {
+  id            String     @id @default(uuid())
+  key           String     @unique // e.g. "direct", "external-link", "example-provider"
+  name          String
+  kind          SourceKind
+  enabled       Boolean    @default(true)
+  countries     String[]   @default([]) // empty = all enabled countries
+  // Source-specific freshness rules
+  expireAfterHours Int     @default(168)
+  recheckIntervalHours Int? // null = provider does not permit/support recheck
+  rateLimitPerMinute Int?
+  attribution   String?    // required display text/link rules
+  createdAt     DateTime   @default(now())
+  listings      Listing[]
+  syncRuns      ProviderSyncRun[]
+}
+
+model ProviderSyncRun {
+  id          String   @id @default(uuid())
+  sourceId    String
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  status      String   // "OK" | "FAILED" | "RATE_LIMITED" | "NOT_CONFIGURED"
+  fetched     Int      @default(0)
+  created     Int      @default(0)
+  updated     Int      @default(0)
+  errorMessage String?
+  source      ListingSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, startedAt])
+}
+
+model Listing {
+  id               String        @id @default(uuid())
+  sourceId         String
+  externalId       String?       // id within the source, for idempotent upserts
+  canonicalUrl     String?       // only where permitted by the source
+  sellerUserId     String?
+  title            String
+  description      String        @default("")
+  categoryKey      String
+  condition        ItemCondition @default(UNKNOWN)
+  // Money in minor units. priceMinor = null means price unknown (NOT free). 0 means free.
+  priceMinor       Int?
+  currency         String        @db.Char(3)
+  isFree           Boolean       @default(false)
+  countryCode      String        @db.Char(2)
+  // Exact location is private; public API uses approx*.
+  lat              Float
+  lng              Float
+  approxLat        Float
+  approxLng        Float
+  locationLabel    String?
+  contactMethod    ContactMethod @default(IN_APP)
+  externalUrl      String?
+  status           ListingStatus @default(ACTIVE)
+  riskLevel        RiskLevel     @default(NO_MAJOR_SIGNALS)
+  riskSignals      Json          @default("[]")
+  isPromoted       Boolean       @default(false)
+  contentHash      String        // normalised title+description hash for duplicate detection
+  duplicateOfId    String?
+  postedAt         DateTime      @default(now())      // when the source says it was posted
+  lastConfirmedAt  DateTime      @default(now())      // last positive availability evidence
+  lastRefreshedAt  DateTime      @default(now())      // last provider/seller refresh
+  expiresAt        DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  source           ListingSource @relation(fields: [sourceId], references: [id])
+  seller           User?         @relation(fields: [sellerUserId], references: [id], onDelete: SetNull)
+  duplicateOf      Listing?      @relation("duplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates       Listing[]     @relation("duplicates")
+  images           ListingImage[]
+  priceObservations ListingPriceObservation[]
+  availabilityEvents ListingAvailabilityEvent[]
+  dealScores       DealScore[]
+  savedBy          SavedListing[]
+  reports          ListingReport[]
+  moderationActions ModerationAction[]
+  promotions       Promotion[]
+  alertDeliveries  AlertDelivery[]
+  dismissals       ListingDismissal[]
+  clicks           AffiliateClick[]
+
+  @@unique([sourceId, externalId])
+  @@index([status, countryCode, categoryKey, postedAt])
+  @@index([lat, lng])
+  @@index([isFree, status, postedAt])
+  @@index([contentHash])
+  @@index([sellerUserId])
+  @@index([expiresAt])
+  @@index([lastConfirmedAt])
+}
+
+model ListingImage {
+  id         String   @id @default(uuid())
+  listingId  String
+  url        String
+  width      Int?
+  height     Int?
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, position])
+}
+
+model ListingPriceObservation {
+  id          String   @id @default(uuid())
+  listingId   String
+  priceMinor  Int
+  currency    String   @db.Char(3)
+  observedAt  DateTime @default(now())
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, observedAt])
+}
+
+model ListingAvailabilityEvent {
+  id          String                @id @default(uuid())
+  listingId   String
+  type        AvailabilityEventType
+  fromStatus  ListingStatus?
+  toStatus    ListingStatus?
+  note        String?
+  actorUserId String?
+  createdAt   DateTime              @default(now())
+  listing     Listing               @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, createdAt])
+}
+
+// Evidence used for comparisons. Only real observations are inserted (from listings, provider data
+// or sold/asking data we are licensed to hold). Nothing here is ever fabricated.
+model ComparablePriceObservation {
+  id           String   @id @default(uuid())
+  categoryKey  String
+  titleKey     String   // normalised keyword group, e.g. "macbook air"
+  condition    ItemCondition @default(UNKNOWN)
+  countryCode  String   @db.Char(2)
+  currency     String   @db.Char(3)
+  priceMinor   Int
+  sourceKey    String
+  sourceListingId String?
+  observedAt   DateTime @default(now())
+
+  @@index([countryCode, categoryKey, titleKey, observedAt])
+  @@index([sourceListingId])
+}
+
+model DealScore {
+  id            String   @id @default(uuid())
+  listingId     String
+  score         Int      // 0-100
+  version       String   // scoring ruleset version
+  factors       Json     // transparent breakdown
+  explanation   String
+  sampleSize    Int      @default(0)
+  compLowMinor  Int?
+  compHighMinor Int?
+  compMedianMinor Int?
+  hasPriceEvidence Boolean @default(false)
+  computedAt    DateTime @default(now())
+  listing       Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, computedAt])
+}
+
+model SavedListing {
+  userId     String
+  listingId  String
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([userId, listingId])
+}
+
+model ListingDismissal {
+  userId     String
+  listingId  String
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([userId, listingId])
+}
+
+model CategoryInteraction {
+  userId      String
+  categoryKey String
+  weight      Int      @default(1)
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryKey])
+}
+
+model SavedSearch {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  query       Json     // normalised filter object
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alert       AlertSubscription?
+
+  @@index([userId])
+}
+
+model AlertSubscription {
+  id              String         @id @default(uuid())
+  userId          String
+  savedSearchId   String?        @unique
+  name            String
+  keywords        String[]       @default([])
+  excludedWords   String[]       @default([])
+  categories      String[]       @default([])
+  minPriceMinor   Int?
+  maxPriceMinor   Int?
+  currency        String?        @db.Char(3)
+  freeOnly        Boolean        @default(false)
+  radiusKm        Float?
+  centerLat       Float?
+  centerLng       Float?
+  conditions      ItemCondition[] @default([])
+  minDealScore    Int?
+  sourceKeys      String[]       @default([])
+  frequency       AlertFrequency @default(IMMEDIATE)
+  active          Boolean        @default(true)
+  lastDigestAt    DateTime?
+  createdAt       DateTime       @default(now())
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedSearch     SavedSearch?   @relation(fields: [savedSearchId], references: [id], onDelete: SetNull)
+  deliveries      AlertDelivery[]
+
+  @@index([userId, active])
+}
+
+model AlertDelivery {
+  id              String         @id @default(uuid())
+  subscriptionId  String
+  listingId       String
+  status          DeliveryStatus @default(PENDING)
+  reason          String?
+  createdAt       DateTime       @default(now())
+  sentAt          DateTime?
+  subscription    AlertSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  listing         Listing        @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  // One delivery per subscription+listing: the dedup guarantee.
+  @@unique([subscriptionId, listingId])
+  @@index([status, createdAt])
+}
+
+model SellerProfile {
+  userId       String   @id
+  displayName  String
+  bio          String?
+  verifiedEmail Boolean @default(false)
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model BusinessAccount {
+  id           String   @id @default(uuid())
+  ownerUserId  String   @unique
+  businessName String
+  countryCode  String   @db.Char(2)
+  website      String?
+  status       String   @default("PENDING") // PENDING | ACTIVE | SUSPENDED
+  createdAt    DateTime @default(now())
+  owner        User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  promotions   Promotion[]
+}
+
+model Promotion {
+  id               String          @id @default(uuid())
+  listingId        String
+  businessId       String
+  status           PromotionStatus @default(DRAFT)
+  startsAt         DateTime?
+  endsAt           DateTime?
+  budgetMinor      Int?
+  currency         String?         @db.Char(3)
+  paymentRef       String?         @unique // idempotency key from payment provider
+  impressions      Int             @default(0)
+  clicks           Int             @default(0)
+  createdAt        DateTime        @default(now())
+  listing          Listing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  business         BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([status, endsAt])
+}
+
+model Subscription {
+  id              String             @id @default(uuid())
+  userId          String             @unique
+  tier            SubscriptionTier   @default(FREE)
+  status          SubscriptionStatus @default(NONE)
+  provider        String?
+  providerRef     String?            @unique
+  currentPeriodEnd DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AffiliateClick {
+  id          String   @id @default(uuid())
+  listingId   String
+  userId      String?
+  programme   String?  // approved affiliate programme key, null = plain outbound click
+  disclosed   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, createdAt])
+}
+
+model ResaleCalculation {
+  id                  String   @id @default(uuid())
+  userId              String
+  listingId           String?
+  label               String
+  currency            String   @db.Char(3)
+  purchaseMinor       Int
+  resaleMinor         Int
+  transportMinor      Int      @default(0)
+  repairMinor         Int      @default(0)
+  otherMinor          Int      @default(0)
+  feeBasisPoints      Int      @default(0) // selling fee as basis points of resale price (100 = 1%)
+  feeFixedMinor       Int      @default(0)
+  totalCostMinor      Int
+  grossProfitMinor    Int
+  netProfitMinor      Int
+  marginBasisPoints   Int?
+  breakEvenMinor      Int
+  createdAt           DateTime @default(now())
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model UserBlock {
+  blockerId  String
+  blockedId  String
+  createdAt  DateTime @default(now())
+  blocker    User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked    User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+}
+
+model ListingReport {
+  id          String       @id @default(uuid())
+  listingId   String
+  reporterId  String
+  reason      ReportReason
+  details     String?
+  evidenceUrl String?
+  status      ReportStatus @default(OPEN)
+  createdAt   DateTime     @default(now())
+  resolvedAt  DateTime?
+  listing     Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reporter    User         @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  // One report per user per listing per reason prevents report-flooding by a single account.
+  @@unique([listingId, reporterId, reason])
+  @@index([status, createdAt])
+}
+
+model ModerationAction {
+  id          String               @id @default(uuid())
+  listingId   String?
+  targetUserId String?
+  moderatorId String
+  type        ModerationActionType
+  reason      String
+  createdAt   DateTime             @default(now())
+  listing     Listing?             @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  appeals     Appeal[]
+
+  @@index([listingId])
+  @@index([targetUserId])
+}
+
+model Appeal {
+  id            String       @id @default(uuid())
+  actionId      String
+  userId        String
+  message       String
+  status        AppealStatus @default(PENDING)
+  createdAt     DateTime     @default(now())
+  resolvedAt    DateTime?
+  action        ModerationAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("actor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// Countries the product can operate in. `enabled` is switched from the admin dashboard; the launch
+// set (US, CA, GB by default) is enabled the first time the catalog is loaded.
+model Country {
+  code            String   @id @db.Char(2)
+  name            String
+  currency        String   @db.Char(3)   // default currency for the country (ISO 4217)
+  distanceUnit    String   @default("km") // "mi" | "km"
+  defaultTimeZone String   @default("UTC") // IANA zone suggested for new accounts
+  enabled         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([enabled])
+}

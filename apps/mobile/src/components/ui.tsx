@@ -67,10 +67,23 @@ export function Panel({ children, style }: { children: React.ReactNode; style?: 
 }
 
 export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
+  // Password fields get a show/hide button so people can check what they typed.
+  const isSecret = !!props.secureTextEntry;
+  const [shown, setShown] = React.useState(false);
+  const input = (
+    <TextInput accessibilityLabel={label} placeholderTextColor={colors.placeholder} {...props} secureTextEntry={isSecret && !shown} autoCorrect={isSecret ? false : props.autoCorrect} spellCheck={isSecret ? false : props.spellCheck} style={[s.input, props.multiline && { minHeight: 96, textAlignVertical: 'top', paddingTop: 12 }, isSecret && { paddingRight: 52 }, props.style]} />
+  );
   return (
     <View style={{ gap: 6 }}>
       <Text style={type.label}>{label}</Text>
-      <TextInput accessibilityLabel={label} placeholderTextColor={colors.placeholder} {...props} style={[s.input, props.multiline && { minHeight: 96, textAlignVertical: 'top', paddingTop: 12 }, props.style]} />
+      {isSecret ? (
+        <View>
+          {input}
+          <Pressable accessibilityRole="button" accessibilityLabel={shown ? 'Hide password' : 'Show password'} hitSlop={8} onPress={() => setShown((v) => !v)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 48, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name={shown ? 'eye-off-outline' : 'eye-outline'} size={22} color={colors.muted} />
+          </Pressable>
+        </View>
+      ) : input}
       {hint ? <Text style={type.small}>{hint}</Text> : null}
     </View>
   );
