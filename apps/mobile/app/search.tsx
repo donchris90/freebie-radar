@@ -1,6 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, ScrollView, View } from 'react-native';
+import { AdSlot } from '../src/ads';
 import { api, ApiError, CATEGORIES, ListingView, Page, titleCase } from '../src/api';
 import { useAuth } from '../src/auth';
 import { ListingCard } from '../src/components/ListingCard';
@@ -61,7 +62,7 @@ export default function Search() {
       }
       renderItem={({ item }) => <ListingCard item={item} />}
       ListEmptyComponent={loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={() => load()} /> : <EmptyState title="No matches" body="Try removing a filter or searching a different word." />}
-      ListFooterComponent={cursor ? <Button title="Load more" kind="secondary" busy={more} onPress={() => load(cursor)} /> : null}
+      ListFooterComponent={<><AdSlot placement="search" />{cursor ? <Button title="Load more" kind="secondary" busy={more} onPress={() => load(cursor)} /> : null}</>}
     />
   );
 }

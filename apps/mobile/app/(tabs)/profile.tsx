@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Alert, ScrollView, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, ApiError } from '../../src/api';
+import { useAds } from '../../src/ads';
 import { useAuth } from '../../src/auth';
 import { Button, Chip, EmptyState, Panel } from '../../src/components/ui';
 import { colors, space, type } from '../../src/theme';
@@ -14,6 +15,7 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 );
 
 export default function Profile() {
+  const ads = useAds();
   const { user, logout, logoutEverywhere, refresh } = useAuth();
   const [busy, setBusy] = useState(false);
   const patch = async (body: object) => { try { await api('/me/preferences', { method: 'PATCH', body }); await refresh(); } catch (e) { Alert.alert('Could not save', (e as ApiError).message); } };
@@ -80,6 +82,7 @@ export default function Profile() {
           <Button title="Change password" kind="secondary" onPress={() => router.push('/change-password')} />
           <Button icon="sparkles-outline" title={user.tier === 'FREE' ? 'Premium' : 'Your Premium plan'} kind="secondary" onPress={() => router.push('/premium')} />
           <Button icon="chatbubbles-outline" title="Messages" kind="secondary" onPress={() => router.push('/messages')} />
+          {ads.privacyChoices ? <Button title="Ad privacy choices" kind="secondary" onPress={() => void ads.showPrivacyChoices()} /> : null}
           <Button title="Blocked sellers" kind="secondary" onPress={() => router.push('/blocked')} />
           <Button title="Sign out of all devices" kind="secondary" onPress={() => Alert.alert('Sign out of all devices?', 'Every phone and browser signed in to your account, including this one, will be signed out.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out everywhere', style: 'destructive', onPress: async () => { try { await logoutEverywhere(); } catch (e) { Alert.alert('Could not sign out', (e as ApiError).message); } } }])} />
         </Panel>

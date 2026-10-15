@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { View } from 'react-native';
+import { AdsProvider } from '../src/ads';
 import { AuthProvider } from '../src/auth';
 import { LocationProvider } from '../src/location';
 import { SavedProvider } from '../src/saved';
@@ -18,6 +19,7 @@ export default function RootLayout() {
     <AuthProvider>
       <LocationProvider>
         <SavedProvider>
+          <AdsProvider>
           <StatusBar style="dark" />
           <Stack screenOptions={{
             headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.ink, headerShadowVisible: false, contentStyle: { backgroundColor: colors.bg },
@@ -40,6 +42,7 @@ export default function RootLayout() {
             <Stack.Screen name="blocked" options={{ title: 'Blocked sellers' }} />
             <Stack.Screen name="register" options={{ title: 'Create account', presentation: 'modal' }} />
           </Stack>
+          </AdsProvider>
         </SavedProvider>
       </LocationProvider>
     </AuthProvider>

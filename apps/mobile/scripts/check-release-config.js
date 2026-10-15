@@ -15,6 +15,15 @@ if (profile !== 'development') {
     }
   }
 }
+// Ads: switching them on in a store build with Google's test ids would show test ads and earn nothing.
+const GOOGLE_TEST = '3940256099942544';
+if (profile !== 'development' && process.env.EXPO_PUBLIC_ADS_ENABLED === 'true') {
+  for (const k of ['ADMOB_ANDROID_APP_ID', 'ADMOB_IOS_APP_ID', 'EXPO_PUBLIC_ADMOB_BANNER_ANDROID', 'EXPO_PUBLIC_ADMOB_BANNER_IOS']) {
+    const v = process.env[k] || '';
+    if (!v) problems.push(`EXPO_PUBLIC_ADS_ENABLED is true but ${k} is not set.`);
+    else if (v.includes(GOOGLE_TEST)) problems.push(`${k} is one of Google's test ids; use your own AdMob id for a store build.`);
+  }
+}
 if (problems.length) {
   console.error('\nRelease configuration problem:\n - ' + problems.join('\n - ') + '\n');
   process.exit(1);

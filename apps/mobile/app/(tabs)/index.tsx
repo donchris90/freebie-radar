@@ -5,6 +5,7 @@ import React, { useCallback, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, CATEGORIES, ListingView, Page, titleCase } from '../../src/api';
+import { AdSlot } from '../../src/ads';
 import { useAuth } from '../../src/auth';
 import { ListingCard } from '../../src/components/ListingCard';
 import { LocationBar } from '../../src/components/LocationBar';
@@ -65,6 +66,7 @@ export default function Discover() {
             : <EmptyState icon="location-outline" title="Set your location" body="Choose where to look and we will show free items near you." action={<Button title="Use my location" busy={busy} onPress={useCurrent} />} />}
         </Section>
 
+        <AdSlot placement="home" />
         <Section title="Exceptional deals">
           <Text style={[type.small, { paddingHorizontal: space.lg, marginBottom: space.sm }]}>Deal Scores appear only when enough comparable listings exist.</Text>
           <Row state={deals} empty={<EmptyState title="No scored deals yet" body="We only score a listing when there is enough comparable price evidence." />} />
