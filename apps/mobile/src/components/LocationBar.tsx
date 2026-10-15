@@ -1,20 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useLocationState } from '../location';
 import { colors, radius, space, type } from '../theme';
+import { Text } from './Text';
 import { Button, Field } from './ui';
 
-export function LocationBar() {
+export function LocationBar({ onDark }: { onDark?: boolean }) {
   const { place, busy, error, useCurrent, setManual, permission } = useLocationState();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   return (
     <>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Location: ${place?.label ?? 'not set'}. Change`} onPress={() => setOpen(true)} style={s.pill}>
-        <Ionicons name="location-outline" size={16} color={colors.ink} />
-        <Text style={s.pillText} numberOfLines={1}>{place ? place.label : 'Set location'}</Text>
-        <Ionicons name="chevron-down" size={14} color={colors.muted} />
+      <Pressable accessibilityRole="button" accessibilityLabel={`Location: ${place?.label ?? 'not set'}. Change`} onPress={() => setOpen(true)} style={[s.pill, onDark && s.pillDark]}>
+        <Ionicons name="location" size={16} color={onDark ? colors.sticker : colors.accent} />
+        <Text style={[s.pillText, onDark && { color: '#fff' }]} numberOfLines={1}>{place ? place.label : 'Set location'}</Text>
+        <Ionicons name="chevron-down" size={14} color={onDark ? 'rgba(255,255,255,0.7)' : colors.muted} />
       </Pressable>
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <View style={s.backdrop}>
@@ -38,7 +39,8 @@ export function LocationBar() {
 
 const s = StyleSheet.create({
   pill: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 12, minHeight: 36, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, maxWidth: 260 },
+  pillDark: { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.25)' },
   pillText: { fontSize: 14, fontWeight: '600', color: colors.ink, flexShrink: 1 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(15,31,43,0.45)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: colors.bg, padding: space.xl, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg },
+  backdrop: { flex: 1, backgroundColor: 'rgba(22,20,59,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.bg, padding: space.xl, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl },
 });

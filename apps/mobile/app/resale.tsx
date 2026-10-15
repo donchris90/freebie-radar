@@ -1,11 +1,12 @@
 import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, View } from 'react-native';
+import { Alert, ScrollView, View } from 'react-native';
 import { api, ApiError } from '../src/api';
 import { useAuth } from '../src/auth';
 import { Button, Field } from '../src/components/ui';
 import { currencyForCountry } from '../src/money';
 import { colors, radius, space, type } from '../src/theme';
+import { Text } from '../src/components/Text';
 
 interface Result { currency: string; totalAcquisitionCostMinor: number; sellingFeesMinor: number; grossProfitMinor: number; netProfitMinor: number; marginBasisPoints: number | null; breakEvenResaleMinor: number | null; disclaimer: string }
 

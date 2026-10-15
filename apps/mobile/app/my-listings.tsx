@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
 import React from 'react';
-import { FlatList, Text, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { api, ListingView, titleCase } from '../src/api';
 import { Button, Chip, EmptyState, ErrorState, LoadingState } from '../src/components/ui';
 import { colors, radius, space, type } from '../src/theme';
 import { useAsync } from '../src/useAsync';
+import { Text } from '../src/components/Text';
 
 export default function MyListings() {
   const state = useAsync(async () => (await api<{ items: ListingView[] }>('/listings/mine')).items, []);

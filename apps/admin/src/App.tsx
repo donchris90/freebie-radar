@@ -22,7 +22,7 @@ function Status({ loading, error, retry }: { loading: boolean; error: string | n
   return null;
 }
 
-function Breakdown({ title, data }: { title: string; data: Record<string, number> }) {
+function Breakdown({ title, data, raw }: { title: string; data: Record<string, number>; raw?: boolean }) {
   const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...entries.map(([, n]) => n));
   return (
@@ -30,7 +30,7 @@ function Breakdown({ title, data }: { title: string; data: Record<string, number
       <h2>{title}</h2>
       {entries.length === 0 ? <p className="muted">No data yet.</p> : entries.map(([k, n]) => (
         <div key={k} style={{ marginBottom: 10 }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}><span>{k.replace(/_/g, ' ').toLowerCase()}</span><strong>{n}</strong></div>
+          <div className="row" style={{ justifyContent: 'space-between' }}><span>{raw ? k : k.replace(/_/g, ' ').toLowerCase()}</span><strong>{n}</strong></div>
           <div className="bar" aria-hidden="true"><span style={{ width: `${(n / max) * 100}%` }} /></div>
         </div>
       ))}
@@ -45,15 +45,15 @@ function Overview() {
       <Status {...s} retry={s.reload} />
       {s.data ? (
         <>
-          <div className="grid">
-            <section className="card"><h2>Users</h2><div className="big">{s.data.users}</div></section>
-            <section className="card"><h2>Open reports</h2><div className="big">{s.data.openReports}</div></section>
-            <section className="card"><h2>Duplicate listings</h2><div className="big">{s.data.duplicateListings}</div></section>
-          </div>
+          <section className="stats" aria-label="Key numbers">
+            <div><span className="stat-label">Users</span><span className="stat-num">{s.data.users}</span></div>
+            <div><span className="stat-label">Open reports</span><span className={`stat-num ${s.data.openReports > 0 ? 'attn' : ''}`}>{s.data.openReports}</span></div>
+            <div><span className="stat-label">Duplicate listings</span><span className="stat-num">{s.data.duplicateListings}</span></div>
+          </section>
           <div className="grid">
             <Breakdown title="Listings by status" data={s.data.listingsByStatus} />
             <Breakdown title="Listings by source" data={s.data.listingsBySource} />
-            <Breakdown title="Listings by country" data={s.data.listingsByCountry} />
+            <Breakdown title="Listings by country" data={s.data.listingsByCountry} raw />
             <Breakdown title="Alert deliveries by status" data={s.data.deliveriesByStatus} />
           </div>
           <p className="muted">Counts come straight from the database. Provider failure rates, retention, revenue and promotion metrics will appear here once those systems exist.</p>
@@ -82,8 +82,7 @@ function Reports() {
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Moderation queue</h2>
-        <div className="row">{(['OPEN', 'IN_REVIEW', 'ACTIONED', 'DISMISSED'] as const).map((s) => <button key={s} aria-pressed={status === s} onClick={() => { setStatus(s); setOffset(0); }}>{s.replace('_', ' ').toLowerCase()}</button>)}</div>
+        <div className="row segmented" role="group" aria-label="Report status">{(['OPEN', 'IN_REVIEW', 'ACTIONED', 'DISMISSED'] as const).map((s) => <button key={s} aria-pressed={status === s} onClick={() => { setStatus(s); setOffset(0); }}>{s.replace('_', ' ').toLowerCase()}</button>)}</div>
       </div>
       <Status {...q} retry={q.reload} />
       {msg ? <p className="err" role="alert">{msg}</p> : null}
@@ -133,12 +132,11 @@ function Appeals() {
   };
   return (
     <section className="card">
-      <h2>Pending appeals</h2>
       <Status {...q} retry={q.reload} />
       {msg ? <p className="err" role="alert">{msg}</p> : null}
       {q.data && q.data.length === 0 ? <p className="muted">No pending appeals.</p> : null}
       {q.data?.map((a) => (
-        <div key={a.id} className="card" style={{ marginTop: 12 }}>
+        <div key={a.id} className="item">
           <p style={{ margin: 0 }}>{a.message}</p>
           <p className="muted">{new Date(a.createdAt).toLocaleString()}</p>
           <div className="row"><input aria-label="Decision note" placeholder="Note (required)" value={note[a.id] ?? ''} onChange={(e) => setNote({ ...note, [a.id]: e.target.value })} style={{ maxWidth: 320 }} />
@@ -165,7 +163,6 @@ function Countries() {
   const on = rows.filter((c) => c.enabled);
   return (
     <section className="card">
-      <h2>Countries</h2>
       <p className="muted">Only enabled countries accept new accounts and listings. Turning one off does not remove existing users or listings. {on.length ? `Enabled now: ${on.map((c) => c.code).join(', ')}.` : ''}</p>
       <Status {...q} retry={q.reload} />
       {msg ? <p className="err" role="alert">{msg}</p> : null}
@@ -179,7 +176,7 @@ function Countries() {
                 <td>{c.currency}</td>
                 <td>{c.distanceUnit}</td>
                 <td>{c.timeZone}</td>
-                <td>{c.enabled ? 'Enabled' : 'Off'}</td>
+                <td><span className={`pill ${c.enabled ? 'on' : ''}`}>{c.enabled ? 'Enabled' : 'Off'}</span></td>
                 <td><button disabled={busy === c.code} onClick={() => toggle(c)}>{c.enabled ? 'Turn off' : 'Turn on'}</button></td>
               </tr>
             ))}
@@ -197,7 +194,7 @@ function Audit() {
   const rows = (q.data?.items ?? []).filter((r) => !filter || r.action.toLowerCase().includes(filter.toLowerCase()) || (r.entityId ?? '').includes(filter));
   return (
     <section className="card">
-      <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>Audit log</h2><input aria-label="Filter this page by action or id" placeholder="Filter this page…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 240 }} /></div>
+      <div className="row" style={{ justifyContent: 'flex-end' }}><input aria-label="Filter this page by action or id" placeholder="Filter this page…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 240 }} /></div>
       <Status {...q} retry={q.reload} />
       {q.data ? <table><thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody>
         {rows.map((r) => <tr key={r.id}><td>{new Date(r.createdAt).toLocaleString()}</td><td>{r.action}</td><td className="muted">{r.entityType} {r.entityId?.slice(0, 8)}</td><td className="muted">{Object.keys(r.metadata).length ? JSON.stringify(r.metadata) : ''}</td></tr>)}
@@ -214,12 +211,15 @@ function Jobs() {
   const run = async (path: string) => { setBusy(true); try { setOut(JSON.stringify(await api(path, { method: 'POST' }))); } catch (e) { setOut((e as Error).message); } finally { setBusy(false); } };
   return (
     <section className="card">
-      <h2>Background jobs</h2>
       <p className="muted">Manual triggers for the job bodies. Scheduled execution (BullMQ) is not wired yet.</p>
       <div className="row"><button disabled={busy} onClick={() => run('/admin/jobs/expire')}>Run listing expiry</button><button disabled={busy} onClick={() => run('/admin/jobs/dispatch-alerts')}>Dispatch pending alerts</button></div>
       {out ? <pre role="status">{out}</pre> : null}
     </section>
   );
+}
+
+function Mark() {
+  return <span className="mark" aria-hidden="true"><i /><b /></span>;
 }
 
 function Login({ onDone }: { onDone: (me: Me) => void }) {
@@ -236,13 +236,21 @@ function Login({ onDone }: { onDone: (me: Me) => void }) {
     } catch (err) { setToken(null); setError((err as Error).message); } finally { setBusy(false); }
   };
   return (
-    <form onSubmit={submit}>
-      <h1>Freebie Radar Admin</h1>
-      <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required /></label>
-      <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
-      {error ? <p className="err" role="alert">{error}</p> : null}
-      <button className="primary" disabled={busy}>Sign in</button>
-    </form>
+    <div className="login">
+      <div className="login-art" aria-hidden="true">
+        <div className="rings"><i /><i /><i /><i /><b /></div>
+        <p className="login-tag">Moderation and operations for Freebie Radar.</p>
+      </div>
+      <form onSubmit={submit}>
+        <div className="brand"><Mark /> <span>Freebie Radar</span></div>
+        <h1>Sign in</h1>
+        <p className="muted">Moderator and admin accounts only.</p>
+        <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required /></label>
+        <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+        {error ? <p className="err" role="alert">{error}</p> : null}
+        <button className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+      </form>
+    </div>
   );
 }
 
@@ -256,19 +264,26 @@ export function App() {
     api<Me>('/me').then((u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }).catch(() => setToken(null)).finally(() => setChecking(false));
   }, []);
 
-  if (checking) return <main><p className="muted" role="status">Loading…</p></main>;
+  if (checking) return <div className="boot"><p className="muted" role="status">Loading…</p></div>;
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
   const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const visible = tabs.filter(([, , show]) => show);
+  const current = visible.find(([k]) => k === tab)?.[1] ?? '';
   return (
-    <>
-      <header>
-        <h1>Freebie Radar Admin</h1>
-        <nav aria-label="Sections">{tabs.filter(([, , show]) => show).map(([k, label]) => <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{label}</button>)}</nav>
-        <span className="row"><span className="muted">{me.displayName} · {me.role.toLowerCase()}</span><button onClick={() => { setToken(null); setMe(null); }}>Sign out</button></span>
-      </header>
+    <div className="shell">
+      <aside>
+        <div className="brand"><Mark /> <span>Freebie Radar</span></div>
+        <nav aria-label="Sections">{visible.map(([k, label]) => <button key={k} aria-current={tab === k ? 'page' : undefined} onClick={() => setTab(k)}>{label}</button>)}</nav>
+        <div className="who">
+          <span className="who-name">{me.displayName}</span>
+          <span className="who-role">{me.role.toLowerCase()}</span>
+          <button onClick={() => { setToken(null); setMe(null); }}>Sign out</button>
+        </div>
+      </aside>
       <main>
+        <h1 className="page-title">{current}</h1>
         {tab === 'overview' && isAdmin ? <Overview /> : null}
         {tab === 'reports' ? <Reports /> : null}
         {tab === 'appeals' ? <Appeals /> : null}
@@ -276,6 +291,6 @@ export function App() {
         {tab === 'audit' && isAdmin ? <Audit /> : null}
         {tab === 'jobs' && isAdmin ? <Jobs /> : null}
       </main>
-    </>
+    </div>
   );
 }

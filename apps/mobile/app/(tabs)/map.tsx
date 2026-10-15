@@ -38,7 +38,7 @@ export default function MapTab() {
         : mode === 'map' ? (
           <View style={{ flex: 1 }}><MapView style={{ flex: 1 }} initialRegion={region} accessibilityLabel="Map of nearby listings">
             {state.data.map((l) => (
-              <Marker key={l.id} coordinate={{ latitude: l.location.lat, longitude: l.location.lng }} title={l.title} description={`${l.price.label} · approximate location`} pinColor={l.price.isFree ? colors.accent : colors.deal} onCalloutPress={() => router.push(`/listing/${l.id}`)} />
+              <Marker key={l.id} coordinate={{ latitude: l.location.lat, longitude: l.location.lng }} title={l.title} description={`${l.price.label} · approximate location`} pinColor={l.price.isFree ? colors.sticker : colors.accent} onCalloutPress={() => router.push(`/listing/${l.id}`)} />
             ))}
           </MapView></View>
         ) : <FlatList data={state.data} keyExtractor={(i) => i.id} contentContainerStyle={{ padding: space.lg, gap: space.md }} renderItem={({ item }) => <ListingCard item={item} />} />}

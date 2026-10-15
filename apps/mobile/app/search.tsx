@@ -1,13 +1,14 @@
 import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, ScrollView, Text, View } from 'react-native';
+import { FlatList, ScrollView, View } from 'react-native';
 import { api, ApiError, CATEGORIES, ListingView, Page, titleCase } from '../src/api';
 import { useAuth } from '../src/auth';
 import { ListingCard } from '../src/components/ListingCard';
 import { Button, Chip, EmptyState, ErrorState, Field, LoadingState } from '../src/components/ui';
 import { useLocationState } from '../src/location';
 import { currencyForCountry, toMinor } from '../src/money';
-import { space, type } from '../src/theme';
+import { colors, space, type } from '../src/theme';
+import { Text } from '../src/components/Text';
 
 export default function Search() {
   const params = useLocalSearchParams<{ q?: string; category?: string; freeOnly?: string }>();
@@ -54,7 +55,7 @@ export default function Search() {
             {CATEGORIES.map((c) => <Chip key={c} label={titleCase(c)} selected={category === c} onPress={() => setCategory(category === c ? undefined : c)} />)}
           </ScrollView>
           <Field label={`Max price (${currency})`} value={maxPrice} onChangeText={setMaxPrice} keyboardType="decimal-pad" placeholder="Any" hint={priceInvalid ? 'Enter a valid amount, e.g. 25 or 25.50' : undefined} />
-          {radius && !place ? <Text style={[type.small, { color: '#8A5A00' }]}>Set a location on the Discover tab to filter by distance.</Text> : null}
+          {radius && !place ? <Text style={[type.small, { color: colors.caution }]}>Set a location on the Discover tab to filter by distance.</Text> : null}
           {!loading && !error ? <Text style={type.small}>{total} result{total === 1 ? '' : 's'}</Text> : null}
         </View>
       }

@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Switch, View } from 'react-native';
 import { api, ApiError, CATEGORIES, CONDITIONS, ListingView, titleCase, uploadPhoto } from '../src/api';
 import { useAuth } from '../src/auth';
 import { Button, Chip, EmptyState, Field } from '../src/components/ui';
@@ -9,6 +9,7 @@ import { LocationBar } from '../src/components/LocationBar';
 import { useLocationState } from '../src/location';
 import { currencyForCountry, toMinor } from '../src/money';
 import { colors, space, type } from '../src/theme';
+import { Text } from '../src/components/Text';
 
 const MAX_PHOTOS = 8;
 interface Photo { id: string; uri: string; url?: string; error?: string }
@@ -74,7 +75,7 @@ export default function Sell() {
       <Field label="Description" value={description} onChangeText={setDescription} multiline maxLength={5000} placeholder="Condition, size, anything the buyer should know" />
       <View style={{ gap: space.sm }}><Text style={type.label}>Category</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>{CATEGORIES.map((c) => <Chip key={c} label={titleCase(c)} selected={category === c} onPress={() => setCategory(c)} />)}</View></View>
       <View style={{ gap: space.sm }}><Text style={type.label}>Condition</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>{CONDITIONS.map((c) => <Chip key={c} label={titleCase(c)} selected={condition === c} onPress={() => setCondition(c)} />)}</View></View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={type.body}>Giving it away for free</Text><Switch accessibilityLabel="Free item" value={free} onValueChange={setFree} trackColor={{ true: colors.accent }} /></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={type.body}>Giving it away for free</Text><Switch accessibilityLabel="Free item" value={free} onValueChange={setFree} trackColor={{ true: colors.accent, false: colors.line }} /></View>
       {!free ? <Field label={`Price (${currency})`} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="25.00" /> : null}
       <View style={{ gap: space.sm }}><Text style={type.label}>Where is the item?</Text><LocationBar /></View>
       <View style={{ gap: space.sm }}><Text style={type.label}>Keep listed for</Text><View style={{ flexDirection: 'row', gap: space.sm }}>{[7, 14, 30].map((d) => <Chip key={d} label={`${d} days`} selected={days === d} onPress={() => setDays(d)} />)}</View></View>
@@ -85,7 +86,7 @@ export default function Sell() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
             {photos.map((p) => (
               <View key={p.id} style={{ width: 96, height: 96 }}>
-                <Image source={{ uri: p.uri }} style={{ width: 96, height: 96, borderRadius: 8, backgroundColor: '#E8EDEA', opacity: p.url ? 1 : 0.5 }} accessibilityIgnoresInvertColors />
+                <Image source={{ uri: p.uri }} style={{ width: 96, height: 96, borderRadius: 8, backgroundColor: colors.imageBg, opacity: p.url ? 1 : 0.5 }} accessibilityIgnoresInvertColors />
                 {p.error ? <Text style={[type.small, { color: colors.danger, position: 'absolute', bottom: 2, left: 4, right: 4 }]} numberOfLines={2}>{p.error}</Text> : !p.url ? <Text style={[type.small, { position: 'absolute', top: 38, alignSelf: 'center' }]}>Uploading…</Text> : null}
                 <Pressable accessibilityRole="button" accessibilityLabel="Remove photo" onPress={() => setPhotos((cur) => cur.filter((x) => x.id !== p.id))} style={{ position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
                   <Text style={{ color: '#fff', fontSize: 14, lineHeight: 16 }}>✕</Text>

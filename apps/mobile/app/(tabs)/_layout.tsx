@@ -8,8 +8,12 @@ const Icon = ({ name, color, size }: { name: IconName; color: unknown; size: num
 
 export default function TabsLayout() {
   return (
-    <Tabs screenOptions={{ headerShown: false, tabBarActiveTintColor: colors.accent, tabBarInactiveTintColor: colors.muted, tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.line }, tabBarLabelStyle: { fontSize: 12, fontWeight: '600' } }}>
-      <Tabs.Screen name="index" options={{ title: 'Discover', tabBarIcon: ({ color, focused, size }) => <Icon name={focused ? 'compass' : 'compass-outline'} color={color} size={size} /> }} />
+    <Tabs screenOptions={{
+      headerShown: false, tabBarActiveTintColor: colors.accent, tabBarInactiveTintColor: colors.muted,
+      tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.line, borderTopWidth: 1, height: 64, paddingTop: 6, paddingBottom: 8 },
+      tabBarLabelStyle: { fontSize: 12, fontFamily: 'DMSans_700Bold' },
+    }}>
+      <Tabs.Screen name="index" options={{ title: 'Discover', tabBarIcon: ({ color, focused, size }) => <Icon name={focused ? 'radio' : 'radio-outline'} color={color} size={size} /> }} />
       <Tabs.Screen name="map" options={{ title: 'Map', tabBarIcon: ({ color, focused, size }) => <Icon name={focused ? 'map' : 'map-outline'} color={color} size={size} /> }} />
       <Tabs.Screen name="alerts" options={{ title: 'Alerts', tabBarIcon: ({ color, focused, size }) => <Icon name={focused ? 'notifications' : 'notifications-outline'} color={color} size={size} /> }} />
       <Tabs.Screen name="saved" options={{ title: 'Saved', tabBarIcon: ({ color, focused, size }) => <Icon name={focused ? 'heart' : 'heart-outline'} color={color} size={size} /> }} />

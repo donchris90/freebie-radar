@@ -1,12 +1,13 @@
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, Switch, Text, View } from 'react-native';
+import { ScrollView, Switch, View } from 'react-native';
 import { api, ApiError, CATEGORIES, titleCase } from '../../src/api';
 import { useAuth } from '../../src/auth';
 import { Button, Chip, EmptyState, Field } from '../../src/components/ui';
 import { useLocationState } from '../../src/location';
 import { currencyForCountry, toMinor } from '../../src/money';
 import { colors, space, type } from '../../src/theme';
+import { Text } from '../../src/components/Text';
 
 const FREQ = [['IMMEDIATE', 'Immediately'], ['HOURLY_DIGEST', 'Hourly digest'], ['DAILY_DIGEST', 'Daily digest']] as const;
 
@@ -58,7 +59,7 @@ export default function NewAlert() {
       <Field label="Alert name" value={name} onChangeText={setName} placeholder="MacBook under 250" />
       <Field label="Keywords (any of, comma separated)" value={keywords} onChangeText={setKeywords} placeholder="macbook, thinkpad" autoCapitalize="none" />
       <Field label="Exclude words" value={excluded} onChangeText={setExcluded} placeholder="broken, parts" autoCapitalize="none" />
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={type.body}>Free items only</Text><Switch value={freeOnly} onValueChange={setFreeOnly} trackColor={{ true: colors.accent }} accessibilityLabel="Free items only" /></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={type.body}>Free items only</Text><Switch value={freeOnly} onValueChange={setFreeOnly} trackColor={{ true: colors.accent, false: colors.line }} accessibilityLabel="Free items only" /></View>
       <Field label={`Max price (${currency})`} value={maxPrice} onChangeText={setMaxPrice} keyboardType="decimal-pad" placeholder="Any" />
       <Field label={`Distance (${unit})`} value={radius} onChangeText={setRadius} keyboardType="decimal-pad" placeholder="Anywhere" hint={place ? `Measured from ${place.label}` : 'Needs a location. Set one on the Discover tab.'} />
       <Field label="Minimum Deal Score (0–100)" value={minScore} onChangeText={setMinScore} keyboardType="number-pad" placeholder="Any" hint="Only listings with enough comparable evidence have a score." />

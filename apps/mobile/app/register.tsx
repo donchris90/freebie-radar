@@ -1,11 +1,12 @@
 import { Link, router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { api, ApiError } from '../src/api';
 import { useAuth } from '../src/auth';
 import { Button, Chip, Field } from '../src/components/ui';
 import { colors, space, type } from '../src/theme';
 import { useAsync } from '../src/useAsync';
+import { Text } from '../src/components/Text';
 
 interface Country { code: string; name: string; currency: string; distanceUnit: string }
 
@@ -39,7 +40,7 @@ export default function Register() {
       </View>
       {error ? <Text accessibilityLiveRegion="polite" style={[type.body, { color: colors.danger }]}>{error}</Text> : null}
       <Button title="Create account" busy={busy} disabled={!name || !email || password.length < 10 || !selected} onPress={submit} />
-      <Link href="/login" replace style={[type.body, { color: colors.accent, textAlign: 'center' }]}>Already have an account? Sign in</Link>
+      <Link href="/login" replace style={[type.body, { color: colors.accent, textAlign: 'center', fontFamily: 'DMSans_700Bold' }]}>Already have an account? Sign in</Link>
     </ScrollView>
   );
 }

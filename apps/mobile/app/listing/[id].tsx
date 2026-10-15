@@ -1,12 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Image, Linking, Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, Linking, Modal, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { api, ApiError, ListingView, titleCase } from '../../src/api';
 import { useAuth } from '../../src/auth';
-import { Button, Chip, ErrorState, LoadingState } from '../../src/components/ui';
+import { Button, Chip, ErrorState, LoadingState, Panel, PriceTag } from '../../src/components/ui';
 import { useSaved } from '../../src/saved';
 import { colors, radius, space, type } from '../../src/theme';
 import { useAsync } from '../../src/useAsync';
+import { Text } from '../../src/components/Text';
 
 const REASONS = [['UNAVAILABLE', 'No longer available'], ['EXPIRED', 'Expired'], ['SUSPICIOUS', 'Looks suspicious'], ['SCAM', 'Possible scam'], ['DUPLICATE', 'Duplicate'], ['PROHIBITED_ITEM', 'Prohibited item'], ['WRONG_INFO', 'Wrong information'], ['OTHER', 'Something else']] as const;
 
@@ -35,30 +36,35 @@ export default function ListingDetail() {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: space.xl * 2 }}>
-      {l.images.length ? (
-        <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>{l.images.map((u) => <Image key={u} source={{ uri: u }} style={{ width, height: 260, backgroundColor: '#E8EDEA' }} accessibilityIgnoresInvertColors />)}</ScrollView>
-      ) : <View style={{ height: 140, backgroundColor: '#E8EDEA', alignItems: 'center', justifyContent: 'center' }}><Text style={type.small}>No photos provided</Text></View>}
+      <View>
+        {l.images.length ? (
+          <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>{l.images.map((u) => <Image key={u} source={{ uri: u }} style={{ width, height: 300, backgroundColor: colors.imageBg }} accessibilityIgnoresInvertColors />)}</ScrollView>
+        ) : <View style={{ height: 160, backgroundColor: colors.imageBg, alignItems: 'center', justifyContent: 'center' }}><Text style={type.small}>No photos provided</Text></View>}
+        <View style={{ position: 'absolute', left: space.lg, bottom: space.lg }}><PriceTag label={l.price.label} free={l.price.isFree} size="lg" /></View>
+        {l.images.length > 1 ? <View style={{ position: 'absolute', right: space.lg, bottom: space.lg, backgroundColor: 'rgba(22,20,59,0.75)', borderRadius: 99, paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{l.images.length} photos · swipe</Text></View> : null}
+      </View>
 
       <View style={{ padding: space.lg, gap: space.md }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
           {l.sponsored ? <Chip tone="sponsored" label="Sponsored" /> : null}
-          {l.price.isFree ? <Chip tone="free" label="Free" /> : null}
           <Chip label={titleCase(l.condition)} />
           <Chip label={titleCase(l.category)} />
         </View>
         <Text style={type.title}>{l.title}</Text>
-        <Text style={{ fontSize: 26, fontWeight: '800', color: l.price.isFree ? colors.accent : colors.ink }}>{l.price.label}</Text>
         <Text style={[type.body, l.freshness.stale && { color: colors.caution }]} accessibilityLiveRegion="polite">{l.freshness.label}</Text>
         {l.status === 'POSSIBLY_EXPIRED' ? <Text style={[type.small, { color: colors.caution }]}>We have not had a recent confirmation that this is still available.</Text> : null}
 
         {l.dealScore ? (
-          <View style={{ backgroundColor: colors.dealSoft, borderRadius: radius.lg, padding: space.lg, gap: 6 }}>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.deal }}>{l.dealScore.score}<Text style={{ fontSize: 16 }}>/100</Text></Text>
-            <Text style={type.body}>{l.dealScore.explanation}</Text>
-            <Text style={type.small}>Based on {l.dealScore.evidence.sampleSize} comparable listings{l.dealScore.evidence.range ? ` (${l.dealScore.evidence.range})` : ''}.</Text>
-            {l.dealScore.evidence.limitations.map((x) => <Text key={x} style={type.small}>• {x}</Text>)}
+          <View style={{ backgroundColor: colors.ink, borderRadius: radius.lg, padding: space.lg + 4, gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+              <Text style={{ fontFamily: 'display', fontWeight: '800', fontSize: 56, lineHeight: 60, color: '#fff', letterSpacing: -2 }}>{l.dealScore.score}</Text>
+              <Text style={{ fontSize: 16, color: 'rgba(255,255,255,0.7)', fontWeight: '700' }}>/100 Deal Score</Text>
+            </View>
+            <Text style={[type.body, { color: '#fff' }]}>{l.dealScore.explanation}</Text>
+            <Text style={[type.small, { color: 'rgba(255,255,255,0.75)' }]}>Based on {l.dealScore.evidence.sampleSize} comparable listings{l.dealScore.evidence.range ? ` (${l.dealScore.evidence.range})` : ''}.</Text>
+            {l.dealScore.evidence.limitations.map((x) => <Text key={x} style={[type.small, { color: 'rgba(255,255,255,0.75)' }]}>• {x}</Text>)}
           </View>
-        ) : <View style={{ backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, borderWidth: 1, borderColor: colors.line }}><Text style={type.label}>Deal Score</Text><Text style={type.body}>{l.dealScoreNote ?? 'Not enough comparable listings to score this one.'}</Text></View>}
+        ) : <Panel><Text style={type.label}>Deal Score</Text><Text style={type.body}>{l.dealScoreNote ?? 'Not enough comparable listings to score this one.'}</Text></Panel>}
 
         <View style={{ gap: 4 }}>
           <Text style={type.h2}>Description</Text>
@@ -77,7 +83,7 @@ export default function ListingDetail() {
           <Text style={type.small}>Not independently verified by Freebie Radar.</Text>
         </View>
 
-        <View style={{ backgroundColor: l.risk.level === 'NO_MAJOR_SIGNALS' ? colors.surface : colors.cautionSoft, borderRadius: radius.lg, padding: space.lg, gap: 4, borderWidth: 1, borderColor: colors.line }}>
+        <View style={{ backgroundColor: l.risk.level === 'NO_MAJOR_SIGNALS' ? colors.surface : colors.cautionSoft, borderRadius: radius.lg, padding: space.lg, gap: 4, borderWidth: 1, borderColor: l.risk.level === 'NO_MAJOR_SIGNALS' ? colors.line : colors.cautionSoft }}>
           <Text style={type.h2}>{l.risk.label}</Text>
           {l.risk.signals.map((x) => <Text key={x} style={type.body}>• {x}</Text>)}
           {l.risk.level === 'NO_MAJOR_SIGNALS' ? <Text style={type.small}>This is not a guarantee. Always take sensible precautions.</Text> : null}
@@ -87,7 +93,7 @@ export default function ListingDetail() {
 
         <View style={{ gap: space.sm }}>
           {l.externalUrl ? <Button title="Open original listing" onPress={openOriginal} /> : <Text style={type.small}>Messaging sellers inside the app is not available yet.</Text>}
-          <Button title={saved ? 'Saved ✓ (tap to remove)' : 'Save listing'} kind="secondary" busy={busy} onPress={() => guard(() => toggle(l.id))} />
+          <Button icon={saved ? 'heart' : 'heart-outline'} title={saved ? 'Saved (tap to remove)' : 'Save listing'} kind="secondary" busy={busy} onPress={() => guard(() => toggle(l.id))} />
           {l.price.minor !== null ? <Button title="Estimate resale profit" kind="secondary" onPress={() => router.push({ pathname: '/resale', params: { purchase: String(l.price.minor! / 100), currency: l.price.currency } })} /> : null}
           {l.isOwner ? <>
             <Button title="Still available — confirm" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/confirm`, { method: 'POST' }), 'Thanks, availability confirmed.')} />
@@ -97,8 +103,8 @@ export default function ListingDetail() {
       </View>
 
       <Modal visible={reporting} transparent animationType="slide" onRequestClose={() => setReporting(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(15,31,43,0.45)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: colors.bg, padding: space.xl, gap: space.md, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(22,20,59,0.5)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: colors.bg, padding: space.xl, gap: space.md, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl }}>
             <Text style={type.h2}>What is wrong with this listing?</Text>
             {REASONS.map(([k, label]) => <Pressable key={k} accessibilityRole="button" onPress={async () => { setReporting(false); await guard(() => api(`/listings/${l.id}/report`, { body: { reason: k } }), 'Thanks. Your report helps keep listings accurate.'); }} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={type.body}>{label}</Text></Pressable>)}
             <Button title="Cancel" kind="secondary" onPress={() => setReporting(false)} />
