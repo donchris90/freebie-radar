@@ -412,8 +412,9 @@ describe('Freebie Radar API', () => {
   });
 
   describe('Radar alerts', () => {
+    // Quiet hours are evaluated in the user's own time zone; pin it to UTC so the tests can compute the hour.
     const setup = async (prefs: Record<string, unknown> = {}) => {
-      const user = await signup(app);
+      const user = await signup(app, { timeZone: 'UTC' });
       await http().patch('/me/preferences').set(bearer(user.token)).send({ pushToken: 'ExpoPushToken[test]', ...prefs }).expect(200);
       return user;
     };
@@ -605,6 +606,70 @@ describe('Freebie Radar API', () => {
       expect(JSON.stringify(r.body)).not.toContain('ExpoPushToken');
       expect((await http().patch('/me/preferences').set(bearer(u.token)).send({ homeLat: 10 })).status).toBe(400);
       expect((await http().patch('/me/preferences').set(bearer(u.token)).send({ homeLat: 999, homeLng: 0 })).status).toBe(400);
+    });
+  });
+
+  describe('countries (switched on from the admin dashboard)', () => {
+    const adminToken = async () => {
+      const a = await signup(app);
+      await ctx.repos.users.update(a.id, { role: 'ADMIN' });
+      return a;
+    };
+
+    it('opens only the US, Canada and the UK at first, and lists them publicly', async () => {
+      const res = await http().get('/countries').expect(200);
+      const codes = res.body.items.map((c: { code: string }) => c.code).sort();
+      expect(codes).toEqual(['CA', 'GB', 'US']);
+      const gb = res.body.items.find((c: { code: string }) => c.code === 'GB');
+      expect(gb).toMatchObject({ currency: 'GBP', distanceUnit: 'mi', timeZone: 'Europe/London' });
+    });
+
+    it('rejects accounts and listings in a country that is not switched on', async () => {
+      const post = (over: Record<string, unknown>) => http().post('/auth/register').send({ email: `x${uniq()}@b.co`, password: 'long-enough-password', displayName: 'Xy', ...over });
+      expect((await post({ countryCode: 'DE' })).status).toBe(400);
+      const u = await signup(app);
+      const res = await http().post('/listings').set(bearer(u.token)).send(payload({ countryCode: 'DE' }));
+      expect(res.status).toBe(400);
+    });
+
+    it('lets only an admin enable a country, then accepts it and applies its defaults', async () => {
+      const admin = await adminToken();
+      const plain = await signup(app);
+      await http().patch('/admin/countries/DE').send({ enabled: true }).expect(401);
+      await http().patch('/admin/countries/DE').set(bearer(plain.token)).send({ enabled: true }).expect(403);
+      await http().get('/admin/countries').set(bearer(plain.token)).expect(403);
+
+      const list = await http().get('/admin/countries').set(bearer(admin.token)).expect(200);
+      expect(list.body.items.length).toBeGreaterThan(20);
+      expect(list.body.items.find((c: { code: string }) => c.code === 'DE').enabled).toBe(false);
+
+      const on = await http().patch('/admin/countries/de').set(bearer(admin.token)).send({ enabled: true }).expect(200);
+      expect(on.body).toMatchObject({ code: 'DE', enabled: true, currency: 'EUR' });
+
+      const reg = await http().post('/auth/register').send({ email: `de${uniq()}@b.co`, password: 'long-enough-password', displayName: 'Hans', countryCode: 'DE' }).expect(201);
+      expect(reg.body.user).toMatchObject({ countryCode: 'DE', timeZone: 'Europe/Berlin' });
+      expect(reg.body.user.prefs.distanceUnit).toBe('km');
+      const listing = await http().post('/listings').set(bearer(reg.body.accessToken)).send(payload({ countryCode: 'DE', currency: 'EUR', lat: 52.52, lng: 13.405 }));
+      expect(listing.status).toBe(201);
+      expect((await http().get('/countries')).body.items.map((c: { code: string }) => c.code)).toContain('DE');
+
+      const audit = await http().get('/admin/audit').set(bearer(admin.token)).expect(200);
+      expect(audit.body.items.some((a: { action: string; entityId: string }) => a.action === 'COUNTRY_ENABLED' && a.entityId === 'DE')).toBe(true);
+
+      // Switching it off again blocks new sign-ups but leaves the existing account alone.
+      await http().patch('/admin/countries/DE').set(bearer(admin.token)).send({ enabled: false }).expect(200);
+      expect((await http().post('/auth/register').send({ email: `de${uniq()}@b.co`, password: 'long-enough-password', displayName: 'Hans', countryCode: 'DE' })).status).toBe(400);
+      await http().get('/me').set(bearer(reg.body.accessToken)).expect(200);
+    });
+
+    it('protects the default country and validates input', async () => {
+      const admin = await adminToken();
+      const off = await http().patch('/admin/countries/US').set(bearer(admin.token)).send({ enabled: false });
+      expect(off.status).toBe(409);
+      expect((await http().get('/countries')).body.items.some((c: { code: string }) => c.code === 'US')).toBe(true);
+      await http().patch('/admin/countries/ZZ').set(bearer(admin.token)).send({ enabled: true }).expect(404);
+      await http().patch('/admin/countries/USA').set(bearer(admin.token)).send({ enabled: true }).expect(400);
+      await http().patch('/admin/countries/DE').set(bearer(admin.token)).send({ enabled: 'yes' }).expect(400);
     });
   });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setToken, Stats } from './api';
 
-type Tab = 'overview' | 'reports' | 'appeals' | 'audit' | 'jobs';
+type Tab = 'overview' | 'reports' | 'appeals' | 'countries' | 'audit' | 'jobs';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -149,6 +149,47 @@ function Appeals() {
   );
 }
 
+interface CountryRow { code: string; name: string; currency: string; distanceUnit: string; timeZone: string; enabled: boolean }
+
+function Countries() {
+  const q = useLoad(() => api<{ items: CountryRow[] }>('/admin/countries'), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const toggle = async (c: CountryRow) => {
+    setBusy(c.code); setMsg(null);
+    try { await api(`/admin/countries/${c.code}`, { method: 'PATCH', body: { enabled: !c.enabled } }); q.reload(); }
+    catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(null); }
+  };
+  const rows = q.data?.items ?? [];
+  const on = rows.filter((c) => c.enabled);
+  return (
+    <section className="card">
+      <h2>Countries</h2>
+      <p className="muted">Only enabled countries accept new accounts and listings. Turning one off does not remove existing users or listings. {on.length ? `Enabled now: ${on.map((c) => c.code).join(', ')}.` : ''}</p>
+      <Status {...q} retry={q.reload} />
+      {msg ? <p className="err" role="alert">{msg}</p> : null}
+      {rows.length ? (
+        <table>
+          <thead><tr><th>Country</th><th>Currency</th><th>Distance</th><th>Default time zone</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {rows.map((c) => (
+              <tr key={c.code}>
+                <td>{c.name} <span className="muted">({c.code})</span></td>
+                <td>{c.currency}</td>
+                <td>{c.distanceUnit}</td>
+                <td>{c.timeZone}</td>
+                <td>{c.enabled ? 'Enabled' : 'Off'}</td>
+                <td><button disabled={busy === c.code} onClick={() => toggle(c)}>{c.enabled ? 'Turn off' : 'Turn on'}</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </section>
+  );
+}
+
 function Audit() {
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState('');
@@ -219,7 +260,7 @@ export function App() {
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
-  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['audit', 'Audit log', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['jobs', 'Jobs', isAdmin]];
   return (
     <>
       <header>
@@ -231,6 +272,7 @@ export function App() {
         {tab === 'overview' && isAdmin ? <Overview /> : null}
         {tab === 'reports' ? <Reports /> : null}
         {tab === 'appeals' ? <Appeals /> : null}
+        {tab === 'countries' && isAdmin ? <Countries /> : null}
         {tab === 'audit' && isAdmin ? <Audit /> : null}
         {tab === 'jobs' && isAdmin ? <Jobs /> : null}
       </main>

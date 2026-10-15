@@ -169,3 +169,12 @@ export interface AppealRec {
   status: 'PENDING' | 'UPHELD' | 'REJECTED';
   createdAt: Date;
 }
+
+export interface CountryRec {
+  code: string;
+  name: string;
+  currency: string;
+  distanceUnit: 'mi' | 'km';
+  defaultTimeZone: string;
+  enabled: boolean;
+}

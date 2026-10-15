@@ -9,6 +9,7 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  CountryRec,
   DeliveryRec,
   ListingRec,
   ModerationRec,
@@ -203,6 +204,15 @@ const toModeration = (r: Row): ModerationRec => ({
   createdAt: r.createdAt,
 });
 
+const toCountry = (r: Row): CountryRec => ({
+  code: r.code,
+  name: r.name,
+  currency: r.currency,
+  distanceUnit: r.distanceUnit === 'mi' ? 'mi' : 'km',
+  defaultTimeZone: r.defaultTimeZone,
+  enabled: r.enabled,
+});
+
 const toAppeal = (r: Row): AppealRec => ({
   id: r.id,
   moderationId: r.actionId,
@@ -291,6 +301,29 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
   }
 
   return {
+    countries: {
+      async list() {
+        const rows: Row[] = await db.country.findMany({ orderBy: { name: 'asc' } });
+        return rows.map(toCountry);
+      },
+      async get(code) {
+        const row = await db.country.findUnique({ where: { code: code.toUpperCase() } });
+        return row ? toCountry(row) : null;
+      },
+      async insertIfMissing(c) {
+        await db.country.createMany({ data: [c], skipDuplicates: true });
+      },
+      async setEnabled(code, enabled) {
+        try {
+          const row = await db.country.update({ where: { code: code.toUpperCase() }, data: { enabled } });
+          return toCountry(row);
+        } catch (e) {
+          if (isNotFound(e)) return null;
+          throw e;
+        }
+      },
+    },
+
     users: {
       async insert(u) {
         const row = await db.user.create({

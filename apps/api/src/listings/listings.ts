@@ -1,3 +1,4 @@
+import { CountriesService } from '../countries/countries.service';
 import {
   ArrayMaxSize,
   IsArray,
@@ -114,6 +115,7 @@ export class ListingsService {
     @Inject(REPOS) private readonly repos: Repos,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     private readonly alerts: AlertsService,
+    private readonly countries: CountriesService,
   ) {}
 
   async create(user: UserRec, dto: CreateListingDto) {
@@ -121,7 +123,7 @@ export class ListingsService {
     if (!this.cfg.categories.includes(dto.categoryKey)) throw new BadRequestException('Unknown category');
     if (!isValidCoordinate(dto.lat, dto.lng)) throw new BadRequestException('Invalid coordinates');
     const country = (dto.countryCode ?? user.countryCode).toUpperCase();
-    if (!this.cfg.enabledCountries.includes(country)) throw new BadRequestException(`Country ${country} is not enabled`);
+    if (!(await this.countries.getEnabled(country))) throw new BadRequestException(`Country ${country} is not enabled`);
 
     let currency: string;
     let priceMinor: number | null = null;

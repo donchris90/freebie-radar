@@ -6,6 +6,7 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  CountryRec,
   DeliveryRec,
   ListingRec,
   ModerationRec,
@@ -35,6 +36,7 @@ export function createMemoryRepos(): Repos {
   const audit: AuditRec[] = [];
   const moderation = new Map<string, ModerationRec>();
   const appeals = new Map<string, AppealRec>();
+  const countries = new Map<string, CountryRec>();
 
   const matchesFilter = (l: ListingRec, f: ListingSearchFilter): boolean => {
     if (f.publicOnly && (!isPubliclyListed(l.status) || l.duplicateOfId !== null)) return false;
@@ -59,6 +61,18 @@ export function createMemoryRepos(): Repos {
   };
 
   return {
+    countries: {
+      async list() { return [...countries.values()].sort((a, b) => a.name.localeCompare(b.name)).map(clone); },
+      async get(code) { const c = countries.get(code.toUpperCase()); return c ? clone(c) : null; },
+      async insertIfMissing(c) { if (!countries.has(c.code)) countries.set(c.code, clone(c)); },
+      async setEnabled(code, enabled) {
+        const c = countries.get(code.toUpperCase());
+        if (!c) return null;
+        c.enabled = enabled;
+        return clone(c);
+      },
+    },
+
     users: {
       async insert(u) { users.set(u.id, clone(u)); return clone(u); },
       async findById(id) { const u = users.get(id); return u ? clone(u) : null; },

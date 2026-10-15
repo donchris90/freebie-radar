@@ -17,6 +17,7 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 | Admin dashboard (`apps/admin`): overview stats, moderation queue, appeals, audit log, job triggers, role-gated | Written. Type-checks and `vite build` succeeds. Not exercised against a running API in a browser |
 | Image upload to object storage | Not started. The sell screen has no photo picker, and the API accepts validated `https` image URLs only |
 | In-app messaging between buyer and seller | Not started. The listing screen says so and offers "Open original listing" only for external-link listings |
+| Countries (`Country` table, admin Countries page, public `GET /countries`) | US, CA and GB open at first; every other catalog country is switched on from the admin dashboard. Covered by e2e tests on the in-memory store; needs migration `countries` on PostgreSQL |
 | Payments, promotions, subscriptions | Not implemented. Tier gating exists for alert limits only |
 | Price history and trends | Not implemented (needs the persistence layer to accumulate observations) |
 
@@ -32,7 +33,7 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 npm install                      # from the repo root
 cp apps/api/.env.example apps/api/.env
 cd apps/api
-npx jest                         # 143 tests, 10 suites
+npx jest                         # 150 tests, 10 suites
 npx tsc --noEmit                 # type-check
 npm run build && npm start       # production build (STORE=prisma, needs PostgreSQL)
 npm run start:dev                # local dev; reads apps/api/.env (STORE=prisma for PostgreSQL, STORE=memory for a quick trial)
@@ -58,7 +59,7 @@ npm run build                            # type-check + production build
 
 To try the admin dashboard locally, register a user, then use `npm run seed` with `ADMIN_EMAIL` and `ADMIN_PASSWORD` to create an admin on PostgreSQL (the in-memory store has no seed).
 
-Observed in the build sandbox: 143 tests passing, type-check clean, `nest build` succeeds, and production startup is refused for a weak `JWT_SECRET` and for the in-memory store.
+Observed in the build sandbox: 150 tests passing, type-check clean, `nest build` succeeds, and production startup is refused for a weak `JWT_SECRET` and for the in-memory store.
 
 ## API (no URL prefix)
 
@@ -83,10 +84,13 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 | `POST /resale`, `GET /resale`, `GET /resale/compare`, `DELETE /resale/:id` | user | Saved calculations, ranked per currency |
 | `POST /appeals` | user | Appeal a moderation decision on your listing |
 | `GET /admin/reports`, `POST /admin/reports/:id/resolve`, `POST /admin/listings/:id/moderate`, `GET /admin/appeals`, `POST /admin/appeals/:id/resolve` | moderator, admin | Review queue and decisions (reason required, audited) |
+| `GET /countries` | none | Countries currently open (code, currency, distance unit, time zone) |
+| `GET /admin/countries`, `PATCH /admin/countries/:code` | admin | List the catalog, switch a country on or off (audited; the default country cannot be disabled) |
 | `GET /admin/stats`, `GET /admin/audit`, `POST /admin/jobs/expire`, `POST /admin/jobs/dispatch-alerts` | admin | Real aggregate counts, audit log, job triggers |
 
 ## Design decisions
 
+- Which countries are open is data, not code: the `Country` table is seeded from a reference catalog (`src/core/countries.ts`), `LAUNCH_COUNTRIES` (default `US,CA,GB`) only decides the first-run set, and the admin dashboard decides after that. Disabling a country blocks new accounts and listings but never touches existing ones.
 - Money is integer minor units plus an ISO 4217 currency validated against the runtime's real currency list. Currencies are never mixed or converted when comparing prices.
 - A Deal Score is produced only with at least 5 comparable listings (same country, currency and category, within 90 days). Otherwise the score is `null` with the reason. Unknown price is never treated as free. Promotion never affects scores.
 - Listing status changes only on evidence (provider refresh, seller confirmation, distinct-user reports, moderators). One report never removes a listing.

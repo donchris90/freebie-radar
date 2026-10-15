@@ -632,3 +632,18 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
 }
+
+// Countries the product can operate in. `enabled` is switched from the admin dashboard; the launch
+// set (US, CA, GB by default) is enabled the first time the catalog is loaded.
+model Country {
+  code            String   @id @db.Char(2)
+  name            String
+  currency        String   @db.Char(3)   // default currency for the country (ISO 4217)
+  distanceUnit    String   @default("km") // "mi" | "km"
+  defaultTimeZone String   @default("UTC") // IANA zone suggested for new accounts
+  enabled         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([enabled])
+}

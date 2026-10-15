@@ -1,3 +1,5 @@
+import { DEFAULT_LAUNCH_COUNTRIES } from '../core/countries';
+
 /** Runtime configuration. Market, currency, countries and limits come from the environment, not code. */
 
 export const DEFAULT_CATEGORIES = [
@@ -21,7 +23,8 @@ export interface AppConfig {
   bcryptCost: number;
   defaultCountry: string;
   defaultCurrency: string;
-  enabledCountries: string[];
+  /** Countries switched on the first time the catalog loads. After that the admin dashboard decides. */
+  launchCountries: string[];
   categories: string[];
   throttleLimit: number;
   /** Max saved alerts by tier. Values are configuration, not pricing decisions. */
@@ -50,7 +53,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     bcryptCost: int(env.BCRYPT_COST, nodeEnv === 'test' ? 4 : 11),
     defaultCountry: (env.DEFAULT_COUNTRY ?? 'US').toUpperCase(),
     defaultCurrency: (env.DEFAULT_CURRENCY ?? 'USD').toUpperCase(),
-    enabledCountries: list(env.ENABLED_COUNTRIES, ['US', 'GB', 'CA', 'AU']).map((c) => c.toUpperCase()),
+    launchCountries: list(env.LAUNCH_COUNTRIES, DEFAULT_LAUNCH_COUNTRIES).map((c) => c.toUpperCase()),
     categories: list(env.CATEGORIES, DEFAULT_CATEGORIES),
     throttleLimit: int(env.THROTTLE_LIMIT, 120),
     alertLimits: { FREE: int(env.ALERT_LIMIT_FREE, 3), PREMIUM: int(env.ALERT_LIMIT_PREMIUM, 25), BUSINESS: int(env.ALERT_LIMIT_BUSINESS, 50) },

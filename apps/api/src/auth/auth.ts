@@ -18,6 +18,7 @@ import {
   createParamDecorator,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { CountriesService } from '../countries/countries.service';
 import { JwtService } from '@nestjs/jwt';
 import { Throttle } from '@nestjs/throttler';
 import * as bcrypt from 'bcryptjs';
@@ -159,6 +160,7 @@ export class AuthService {
     @Inject(REPOS) private readonly repos: Repos,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     private readonly jwt: JwtService,
+    private readonly countries: CountriesService,
   ) {}
 
   private async token(u: UserRec) {
@@ -168,8 +170,9 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
     const country = (dto.countryCode ?? this.cfg.defaultCountry).toUpperCase();
-    if (!this.cfg.enabledCountries.includes(country)) throw new BadRequestException(`Country ${country} is not enabled`);
-    const tz = dto.timeZone ?? 'UTC';
+    const countryRec = await this.countries.getEnabled(country);
+    if (!countryRec) throw new BadRequestException(`Country ${country} is not enabled`);
+    const tz = dto.timeZone ?? countryRec.defaultTimeZone;
     if (!validTimeZone(tz)) throw new BadRequestException('Unknown time zone');
     if (await this.repos.users.findByEmail(email)) {
       // Generic message is a deliberate trade-off against enumeration; registration conflicts are still reported.
@@ -187,7 +190,7 @@ export class AuthService {
       timeZone: tz,
       locale: 'en-US',
       prefs: {
-        distanceUnit: country === 'US' || country === 'GB' ? 'mi' : 'km',
+        distanceUnit: countryRec.distanceUnit,
         homeLat: null,
         homeLng: null,
         homeLabel: null,

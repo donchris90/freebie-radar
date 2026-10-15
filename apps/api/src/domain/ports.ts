@@ -4,6 +4,7 @@ import type {
   AppealRec,
   AuditRec,
   Condition,
+  CountryRec,
   DeliveryRec,
   DeliveryStatus,
   ListingRec,
@@ -129,7 +130,16 @@ export interface StatsRepo {
   }>;
 }
 
+export interface CountryRepo {
+  list(): Promise<CountryRec[]>;
+  get(code: string): Promise<CountryRec | null>;
+  /** Inserts the country only when it does not exist yet. Never overwrites an admin's enabled choice. */
+  insertIfMissing(c: CountryRec): Promise<void>;
+  setEnabled(code: string, enabled: boolean): Promise<CountryRec | null>;
+}
+
 export interface Repos {
+  countries: CountryRepo;
   users: UserRepo;
   listings: ListingRepo;
   saved: SavedRepo;
