@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setRefreshToken, setToken, signOut, Stats } from './api';
 
-type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'billing' | 'messages' | 'sources' | 'jobs';
+type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'billing' | 'messages' | 'sources' | 'jobs' | 'growth';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -251,6 +251,59 @@ function Audit() {
   );
 }
 
+interface CodeRow { code: string; label: string; kind: 'MEMBER' | 'AMBASSADOR'; active: boolean; createdAt: string; stats: { signups: number; verifiedSignups: number; listingsPosted: number; itemsGivenAndCollected: number; capped: boolean } }
+interface ImportResult { total: number; created: number; failed: number; ignoredColumns: string[]; results: { line: number; ok: boolean; id?: string; error?: string }[] }
+
+function Growth() {
+  const codes = useLoad(() => api<{ items: CodeRow[] }>('/admin/referral-codes'), []);
+  const [label, setLabel] = useState('');
+  const [code, setCode] = useState('');
+  const [orgEmail, setOrgEmail] = useState('');
+  const [csv, setCsv] = useState('');
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, ok?: string) => { setBusy(true); setMsg(null); try { await fn(); if (ok) setMsg(ok); codes.reload(); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
+  const loadTemplate = async () => { try { setCsv((await api<{ csv: string }>('/org/import/template')).csv); } catch (e) { setMsg((e as Error).message); } };
+  return (
+    <>
+      {msg ? <p role="status" className="muted">{msg}</p> : null}
+      <section className="card">
+        <h2>Organisations</h2>
+        <p className="muted">Approved organisations can upload listings in bulk. Enter the email of an existing account.</p>
+        <div className="row">
+          <input aria-label="Organisation account email" placeholder="email@charity.org" value={orgEmail} onChange={(e) => setOrgEmail(e.target.value)} />
+          <button disabled={busy || !orgEmail} onClick={() => run(() => api('/admin/organisations', { body: { email: orgEmail.trim(), enabled: true } }), 'Approved as an organisation.')}>Approve</button>
+          <button disabled={busy || !orgEmail} onClick={() => run(() => api('/admin/organisations', { body: { email: orgEmail.trim(), enabled: false } }), 'Organisation access removed.')}>Remove</button>
+        </div>
+      </section>
+      <section className="card">
+        <h2>Referral and ambassador codes</h2>
+        <p className="muted">Counts are evidence to review, not proof: accounts and activity can be faked. Check before paying anyone based on them.</p>
+        <div className="row">
+          <input aria-label="Label" placeholder="Label, e.g. Campus club" value={label} onChange={(e) => setLabel(e.target.value)} />
+          <input aria-label="Code (optional)" placeholder="Code (optional)" value={code} onChange={(e) => setCode(e.target.value.replace(/[^A-Za-z0-9]/g, ''))} maxLength={20} />
+          <button disabled={busy || label.trim().length < 2} onClick={() => run(async () => { await api('/admin/referral-codes', { body: { label: label.trim(), ...(code ? { code } : {}) } }); setLabel(''); setCode(''); }, 'Code created.')}>Create code</button>
+        </div>
+        <Status {...codes} retry={codes.reload} />
+        {codes.data ? <table><thead><tr><th>Code</th><th>Label</th><th>Type</th><th>Signups</th><th>Verified</th><th>Listings</th><th>Collected</th><th></th></tr></thead><tbody>
+          {codes.data.items.map((r) => <tr key={r.code}><td>{r.code}</td><td>{r.label}</td><td>{r.kind}</td><td>{r.stats.signups}{r.stats.capped ? '+' : ''}</td><td>{r.stats.verifiedSignups}</td><td>{r.stats.listingsPosted}</td><td>{r.stats.itemsGivenAndCollected}</td><td><button disabled={busy} onClick={() => run(() => api(`/admin/referral-codes/${r.code}/active`, { body: { active: !r.active } }))}>{r.active ? 'Disable' : 'Enable'}</button></td></tr>)}
+        </tbody></table> : null}
+        {codes.data && codes.data.items.length === 0 ? <p className="muted">No codes yet.</p> : null}
+      </section>
+      <section className="card">
+        <h2>Bulk import (CSV)</h2>
+        <p className="muted">Imports listings into your own account as an approved organisation. Up to 100 rows per file.</p>
+        <div className="row"><button onClick={loadTemplate}>Load template</button><input type="file" accept=".csv,text/csv" aria-label="Choose a CSV file" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} /></div>
+        <textarea aria-label="CSV contents" rows={8} value={csv} onChange={(e) => setCsv(e.target.value)} style={{ width: '100%', fontFamily: 'monospace' }} />
+        <button disabled={busy || !csv.trim()} onClick={() => run(async () => setResult(await api<ImportResult>('/org/listings/import', { body: { csv } })))}>Import</button>
+        {result ? <div role="status"><p>{result.created} created, {result.failed} failed of {result.total}.{result.ignoredColumns.length ? ` Ignored columns: ${result.ignoredColumns.join(', ')}.` : ''}</p>
+          {result.results.filter((r) => !r.ok).map((r) => <p key={r.line} className="err">Line {r.line}: {r.error}</p>)}</div> : null}
+      </section>
+    </>
+  );
+}
+
 interface JobRow { name: string; everyMs: number; nextRunAt: string | null; lastSuccess: { at: string; result: unknown } | null; lastFailure: { at: string; reason: string; attempts: number } | null; stale: boolean }
 
 const every = (ms: number) => (ms >= 3_600_000 ? `${Math.round(ms / 3_600_000)} h` : ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
@@ -463,7 +516,7 @@ export function App() {
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
-  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['messages', 'Messages', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['billing', 'Billing', isAdmin], ['sources', 'Sources', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['messages', 'Messages', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['billing', 'Billing', isAdmin], ['sources', 'Sources', isAdmin], ['growth', 'Growth', isAdmin], ['jobs', 'Jobs', isAdmin]];
   const visible = tabs.filter(([, , show]) => show);
   const current = visible.find(([k]) => k === tab)?.[1] ?? '';
   return (
@@ -487,6 +540,7 @@ export function App() {
         {tab === 'countries' && isAdmin ? <Countries /> : null}
         {tab === 'audit' && isAdmin ? <Audit /> : null}
         {tab === 'billing' && isAdmin ? <Billing /> : null}
+        {tab === 'growth' && isAdmin ? <Growth /> : null}
         {tab === 'sources' && isAdmin ? <Sources /> : null}
         {tab === 'jobs' && isAdmin ? <Jobs /> : null}
       </main>

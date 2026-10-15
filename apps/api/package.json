@@ -13,7 +13,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "seed": "ts-node prisma/seed.ts",
     "test:pg": "node scripts/test-pg.js",
-    "test:redis": "node scripts/test-redis.js"
+    "test:redis": "node scripts/test-redis.js",
+    "check:mail": "node scripts/check-mail.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",

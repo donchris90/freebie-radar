@@ -44,6 +44,8 @@ export interface UserRec {
   emailVerifiedAt: Date | null;
   /** Bumped to invalidate every access token issued earlier. */
   tokenVersion: number;
+  /** The referral or ambassador code this person signed up with, if it was valid at the time. */
+  referredByCode?: string | null;
   createdAt: Date;
 }
 
@@ -319,4 +321,32 @@ export interface BillingEventRec {
   attempts: number;
   receivedAt: Date;
   processedAt: Date | null;
+}
+
+// ---- reservations ("I'll take it") ----
+export type ClaimStatus = 'HELD' | 'CONFIRMED' | 'COLLECTED' | 'CANCELLED' | 'EXPIRED' | 'NO_SHOW';
+export type ClaimEndedBy = 'CLAIMER' | 'GIVER' | 'SYSTEM';
+
+export interface ClaimRec {
+  id: string;
+  listingId: string;
+  claimerId: string;
+  giverId: string;
+  status: ClaimStatus;
+  /** While HELD: when the reservation lapses unless the giver confirms. While CONFIRMED: the pickup deadline. */
+  holdExpiresAt: Date;
+  confirmedAt: Date | null;
+  resolvedAt: Date | null;
+  endedBy: ClaimEndedBy | null;
+  createdAt: Date;
+}
+
+// ---- growth ----
+export interface ReferralCodeRec {
+  code: string;
+  label: string;
+  kind: 'MEMBER' | 'AMBASSADOR';
+  ownerUserId: string | null;
+  active: boolean;
+  createdAt: Date;
 }

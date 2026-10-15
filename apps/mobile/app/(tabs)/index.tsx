@@ -79,6 +79,10 @@ export default function Discover() {
           </Section>
         ) : null}
 
+        <View style={{ paddingHorizontal: space.lg, marginBottom: space.md }}>
+          <Button icon="eye-outline" title="Spotted something free outside?" kind="secondary" onPress={() => router.push('/spotted')} />
+        </View>
+
         <Section title="Recently added">
           <Row state={recent} empty={<EmptyState title="No listings yet" body="Be the first to post an item in your area." action={<Button title="Post an item" onPress={() => router.push('/sell')} />} />} />
         </Section>

@@ -138,6 +138,15 @@ enum SubscriptionStatus {
   CANCELLED
 }
 
+enum ClaimStatus {
+  HELD
+  CONFIRMED
+  COLLECTED
+  CANCELLED
+  EXPIRED
+  NO_SHOW
+}
+
 enum AvailabilityEventType {
   CREATED
   PROVIDER_REFRESH
@@ -168,6 +177,8 @@ model User {
   emailVerifiedAt  DateTime?
   /// Bumped on password change, reset and sign-out-everywhere; access tokens carry the version they were issued under.
   tokenVersion     Int           @default(0)
+  /// Referral or ambassador code the person signed up with (see ReferralCode).
+  referredByCode   String?
 
   preference       UserPreference?
   sellerProfile    SellerProfile?
@@ -192,9 +203,13 @@ model User {
   interactions     CategoryInteraction[]
   appeals          Appeal[]
   auditLogs        AuditLog[]            @relation("actor")
+  claimsMade       Claim[]               @relation("claimClaimer")
+  claimsReceived   Claim[]               @relation("claimGiver")
+  referralCodes    ReferralCode[]        @relation("referralOwner")
 
   @@index([status])
   @@index([createdAt])
+  @@index([referredByCode])
 }
 
 model RefreshToken {
@@ -333,6 +348,7 @@ model Listing {
   savedBy          SavedListing[]
   reports          ListingReport[]
   conversations    Conversation[]
+  claims           Claim[]
   moderationActions ModerationAction[]
   promotions       Promotion[]
   alertDeliveries  AlertDelivery[]
@@ -775,4 +791,45 @@ model BillingEvent {
 
   @@unique([provider, eventKey])
   @@index([status, receivedAt])
+}
+
+// ---- Reservations: one person can hold a free item for a short time while pickup is arranged ----
+model Claim {
+  id              String      @id @default(uuid())
+  listingId       String
+  claimerId       String
+  giverId         String
+  status          ClaimStatus @default(HELD)
+  /// Equals listingId while the claim is HELD or CONFIRMED and is null otherwise. It is unique, so the database
+  /// itself guarantees that only one active claim exists per listing, even when two people tap at the same moment.
+  activeListingId String?     @unique
+  /// While HELD: when the reservation lapses unless the giver confirms. While CONFIRMED: the pickup deadline.
+  holdExpiresAt   DateTime
+  confirmedAt     DateTime?
+  resolvedAt      DateTime?
+  /// CLAIMER, GIVER or SYSTEM: who ended it.
+  endedBy         String?
+  createdAt       DateTime    @default(now())
+  listing         Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  claimer         User        @relation("claimClaimer", fields: [claimerId], references: [id], onDelete: Cascade)
+  giver           User        @relation("claimGiver", fields: [giverId], references: [id], onDelete: Cascade)
+
+  @@index([claimerId, status])
+  @@index([giverId, status])
+  @@index([status, holdExpiresAt])
+  @@index([listingId])
+}
+
+// ---- Growth: member invite codes and ambassador codes, so you can see who brings people and listings ----
+model ReferralCode {
+  code        String   @id
+  label       String
+  /// MEMBER (every person gets one) or AMBASSADOR (created by an admin).
+  kind        String
+  ownerUserId String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  owner       User?    @relation("referralOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([ownerUserId])
 }

@@ -40,6 +40,8 @@ export default function RootLayout() {
             <Stack.Screen name="messages" options={{ title: 'Messages' }} />
             <Stack.Screen name="conversation/[id]" options={{ title: 'Conversation' }} />
             <Stack.Screen name="blocked" options={{ title: 'Blocked sellers' }} />
+            <Stack.Screen name="claims" options={{ title: 'Reservations' }} />
+            <Stack.Screen name="spotted" options={{ title: 'Spotted something free?' }} />
             <Stack.Screen name="register" options={{ title: 'Create account', presentation: 'modal' }} />
           </Stack>
           </AdsProvider>

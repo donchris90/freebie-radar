@@ -26,6 +26,8 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -53,11 +55,14 @@ const urlOpts = { protocols: ['http', 'https'], require_protocol: true };
 export class CreateListingDto {
   @IsString() @Length(3, 120) title!: string;
   @IsOptional() @IsString() @MaxLength(5000) description?: string;
-  @IsString() categoryKey!: string;
-  @IsIn(CONDITIONS) condition!: Condition;
+  /** Defaults to "other" so a quick post needs no category. */
+  @IsOptional() @IsString() categoryKey?: string;
+  /** Defaults to UNKNOWN. */
+  @IsOptional() @IsIn(CONDITIONS) condition?: Condition;
   /** Decimal string in major units. "0" means free. Omit when the price is unknown. */
   @IsOptional() @IsString() @MaxLength(20) price?: string;
-  @IsString() currency!: string;
+  /** Defaults to the currency of the poster's country. */
+  @IsOptional() @IsString() currency?: string;
   @IsNumber() lat!: number;
   @IsNumber() lng!: number;
   @IsOptional() @Matches(/^[A-Za-z]{2}$/) countryCode?: string;
@@ -101,7 +106,14 @@ function decodeCursor(c?: string): number {
 const DEAL_SCAN_CAP = 300;
 const DEAL_SCAN_BATCH = 50;
 
-const SOURCE_NAMES: Record<string, string> = { direct: 'Posted on Freebie Radar', 'external-link': 'Link shared by a user' };
+const SOURCE_NAMES: Record<string, string> = { direct: 'Posted on Freebie Radar', 'external-link': 'Link shared by a user', spotted: 'Spotted by a member' };
+/** Listings with this source key are curb finds reported by a member, not offered by the member. */
+export const SPOTTED = 'spotted';
+
+export interface CreateOptions {
+  /** A curb find: free, short-lived, photo required, and the poster is not the giver. */
+  spotted?: boolean;
+}
 
 /** Source-specific freshness rules, in hours. Providers configure their own when added. */
 export const EXPIRY_RULES: Record<string, { expireAfterHours: number; retireAfterHours: number }> = {
@@ -111,6 +123,8 @@ export const EXPIRY_RULES: Record<string, { expireAfterHours: number; retireAfte
 const DEFAULT_RULE = { expireAfterHours: 168, retireAfterHours: 168 };
 
 interface ViewCtx {
+  /** Listing ids that currently have an active reservation, when already looked up for a whole page. */
+  reserved?: Set<string>;
   viewer?: UserRec;
   center?: { lat: number; lng: number } | null;
   unit?: 'mi' | 'km';
@@ -126,12 +140,19 @@ export class ListingsService {
     private readonly countries: CountriesService,
   ) {}
 
-  async create(user: UserRec, dto: CreateListingDto) {
+  async create(user: UserRec, dto: CreateListingDto, opts: CreateOptions = {}) {
     const now = new Date();
     if (this.cfg.requireVerifiedEmail && !user.emailVerifiedAt && user.role === 'USER') {
       throw new ForbiddenException('Verify your email before posting. Open Profile and enter the code we sent you.');
     }
-    if (!this.cfg.categories.includes(dto.categoryKey)) throw new BadRequestException('Unknown category');
+    if (opts.spotted) {
+      if (!dto.imageUrls?.length) throw new BadRequestException('Add a photo so people can recognise what you spotted.');
+      const today = await this.repos.listings.countBySellerSourceSince(user.id, SPOTTED, new Date(now.getTime() - DAY));
+      if (today >= this.cfg.spotted.perDay) throw new HttpException('You have reported a lot of finds today. Please try again tomorrow.', HttpStatus.TOO_MANY_REQUESTS);
+      dto = { ...dto, price: '0', condition: 'UNKNOWN', contactMethod: 'IN_APP', externalUrl: undefined, availabilityDays: undefined };
+    }
+    const categoryKey = dto.categoryKey ?? (this.cfg.categories.includes('other') ? 'other' : this.cfg.categories[0]);
+    if (!this.cfg.categories.includes(categoryKey)) throw new BadRequestException('Unknown category');
     if (!isValidCoordinate(dto.lat, dto.lng)) throw new BadRequestException('Invalid coordinates');
     for (const raw of dto.imageUrls ?? []) {
       const owner = uploadOwner(raw);
@@ -139,12 +160,13 @@ export class ListingsService {
       if (!raw.startsWith('https://') && (owner === null || this.cfg.nodeEnv === 'production')) throw new BadRequestException('Photo links must use https');
     }
     const country = (dto.countryCode ?? user.countryCode).toUpperCase();
-    if (!(await this.countries.getEnabled(country))) throw new BadRequestException(`Country ${country} is not enabled`);
+    const countryRec = await this.countries.getEnabled(country);
+    if (!countryRec) throw new BadRequestException(`Country ${country} is not enabled`);
 
     let currency: string;
     let priceMinor: number | null = null;
     try {
-      currency = assertCurrency(dto.currency);
+      currency = assertCurrency(dto.currency ?? countryRec.currency);
       if (dto.price !== undefined && dto.price !== '') priceMinor = parseMajorToMinor(dto.price, currency);
     } catch (e) {
       if (e instanceof MoneyError) throw new BadRequestException(e.message);
@@ -158,13 +180,13 @@ export class ListingsService {
 
     const rec: ListingRec = {
       id: randomUUID(),
-      sourceKey: dto.externalUrl ? 'external-link' : 'direct',
+      sourceKey: opts.spotted ? SPOTTED : dto.externalUrl ? 'external-link' : 'direct',
       externalId: null,
       sellerUserId: user.id,
       title: dto.title.trim(),
       description,
-      categoryKey: dto.categoryKey,
-      condition: dto.condition,
+      categoryKey,
+      condition: dto.condition ?? 'UNKNOWN',
       priceMinor,
       currency,
       isFree: priceMinor === 0,
@@ -184,7 +206,7 @@ export class ListingsService {
       imageUrls: dto.imageUrls ?? [],
       postedAt: now,
       lastConfirmedAt: now,
-      expiresAt: new Date(now.getTime() + (dto.availabilityDays ?? 14) * DAY),
+      expiresAt: opts.spotted ? new Date(now.getTime() + this.cfg.spotted.ttlHours * 3_600_000) : new Date(now.getTime() + (dto.availabilityDays ?? 14) * DAY),
     };
 
     // Duplicate handling: a strong duplicate from the same seller is rejected; from another seller it is linked.
@@ -235,7 +257,8 @@ export class ListingsService {
     const filter = this.buildFilter(q, viewer, center);
     const blockedSellers = viewer ? await this.repos.blocks.blockedIds(viewer.id) : [];
     const { items, total } = await this.repos.listings.search({ ...filter, excludeSellerIds: blockedSellers });
-    const ctx: ViewCtx = { viewer, center, unit, now: new Date() };
+    const reserved = new Set(await this.repos.claims.activeListingIds(items.map((l) => l.id)));
+    const ctx: ViewCtx = { viewer, center, unit, now: new Date(), reserved };
     const dismissed = viewer ? new Set(await this.repos.saved.dismissedIds(viewer.id)) : new Set<string>();
     const views = await Promise.all(items.filter((l) => !dismissed.has(l.id)).map((l) => this.toPublic(l, ctx)));
     const next = filter.offset + filter.limit;
@@ -250,7 +273,9 @@ export class ListingsService {
     if (viewer && !privileged && l.sellerUserId && (await this.repos.blocks.blockedIds(viewer.id)).includes(l.sellerUserId)) throw new NotFoundException('Listing not found');
     if (viewer) await this.repos.saved.bumpCategory(viewer.id, l.categoryKey);
     const view = await this.toPublic(l, { viewer, center: viewer ? this.homeCenter(viewer) : null, unit: viewer?.prefs.distanceUnit, now: new Date() });
-    return { ...view, safetyGuidance: SAFETY_GUIDANCE };
+    // How many items this member has given away, so a newcomer can see a record. Never shown for curb finds or outside sources.
+    const giver = l.sellerUserId && l.sourceKey !== SPOTTED ? { itemsGiven: (await this.repos.claims.tally(l.sellerUserId)).given } : null;
+    return { ...view, giver, safetyGuidance: SAFETY_GUIDANCE };
   }
 
   /** Hides a seller's listings from the blocker's feeds, search and saved list. The seller is not told. */
@@ -312,7 +337,9 @@ export class ListingsService {
       const rule = src ? { expireAfterHours: src.expireAfterHours, retireAfterHours: src.retireAfterHours } : EXPIRY_RULES[l.sourceKey] ?? DEFAULT_RULE;
       const ev = evaluateExpiry({ status: l.status, lastConfirmedAt: l.lastConfirmedAt, expiresAt: l.expiresAt }, rule, now);
       if (!ev) continue;
-      const next = transition(l.status, ev);
+      let next = transition(l.status, ev);
+      // A curb find that has run its day is simply gone: no "may no longer be available" stage.
+      if (l.sourceKey === SPOTTED && ev === 'AUTO_EXPIRED') next = transition(next, 'AUTO_RETIRED');
       await this.repos.listings.update(l.id, { status: next });
       await this.audit(null, `AVAILABILITY_${ev}`, l.id, { from: l.status, to: next });
       if (ev === 'AUTO_EXPIRED') expired++;
@@ -484,8 +511,13 @@ export class ListingsService {
       images: l.imageUrls,
       externalUrl: l.externalUrl,
       contactMethod: l.contactMethod,
-      /** True when a person (not an outside source) posted it and it is open, so in-app messaging is possible. */
-      messageable: l.sellerUserId !== null && l.status === 'ACTIVE',
+      /** GIVEN: a member is giving it. SPOTTED: a member saw it on the curb. EXTERNAL: it comes from an outside source. */
+      kind: (l.sourceKey === SPOTTED ? 'SPOTTED' : l.sellerUserId ? 'GIVEN' : 'EXTERNAL') as 'SPOTTED' | 'GIVEN' | 'EXTERNAL',
+      /** True when a person who owns the item posted it and it is open, so in-app messaging is possible. */
+      messageable: l.sellerUserId !== null && l.status === 'ACTIVE' && l.sourceKey !== SPOTTED,
+      /** A free item from a member that can be reserved with "I'll take it". */
+      claimable: l.sellerUserId !== null && l.sourceKey !== SPOTTED && l.status === 'ACTIVE' && l.isFree && l.priceMinor === 0,
+      reserved: ctx.reserved ? ctx.reserved.has(l.id) : !!(await this.repos.claims.activeForListing(l.id)),
     };
   }
 

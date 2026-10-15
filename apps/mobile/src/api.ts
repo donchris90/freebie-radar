@@ -9,6 +9,8 @@ export const API_CONFIG_ERROR: string | null = CONFIGURED
   ? (!__DEV__ && !CONFIGURED.startsWith('https://') ? 'This build is configured with a non-HTTPS API address.' : null)
   : (__DEV__ ? null : 'This build has no API address configured.');
 const BASE: string = CONFIGURED ?? 'http://localhost:3000';
+/** Address of a listing's public share page: the preview other people see when a link is posted in a group or message. */
+export const shareUrl = (listingId: string) => `${BASE}/s/${listingId}`;
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public offline = false) {
@@ -119,7 +121,30 @@ export interface ListingView {
   safetyGuidance?: string[];
   isOwner?: boolean;
   messageable: boolean;
+  /** GIVEN: a member is giving it. SPOTTED: a member saw it outside. EXTERNAL: from an outside source. */
+  kind: 'GIVEN' | 'SPOTTED' | 'EXTERNAL';
+  /** A free item that can be reserved with "I'll take it". */
+  claimable: boolean;
+  reserved: boolean;
+  giver?: { itemsGiven: number } | null;
 }
+
+export type ClaimStatus = 'HELD' | 'CONFIRMED' | 'COLLECTED' | 'CANCELLED' | 'EXPIRED' | 'NO_SHOW';
+export interface ClaimView {
+  id: string;
+  role: 'CLAIMER' | 'GIVER';
+  status: ClaimStatus;
+  listing: { id: string; title: string; image: string | null; status: string };
+  other: { displayName: string };
+  /** Only present for the giver, about the person who wants the item. */
+  claimerReliability?: { label: 'NEW' | 'RELIABLE' | 'MOSTLY_RELIABLE' | 'UNRELIABLE'; text: string; outcomes: number };
+  createdAt: string;
+  confirmedAt: string | null;
+  expiresAt: string | null;
+  actions: { confirm: boolean; collected: boolean; noShow: boolean; cancel: boolean };
+}
+export interface ClaimInfo { claimable: boolean; reserved: boolean; mine: ClaimView | null; forGiver: ClaimView | null }
+export interface ReferralInfo { code: string; signups: number; verifiedSignups: number }
 export interface Page<T> { items: T[]; total: number; nextCursor: string | null }
 
 export interface UserView {

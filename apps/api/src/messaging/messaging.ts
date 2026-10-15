@@ -112,6 +112,8 @@ export class MessagingService {
       if (listing && !listing.sellerUserId) throw new BadRequestException('This listing comes from an outside source. Use "Open original listing" to contact them.');
       throw hidden;
     }
+    // The member who spotted a curb find does not own it, so there is nobody to ask about it.
+    if (listing.sourceKey === 'spotted') throw new BadRequestException('This item was spotted outside by a member, so there is nobody to message about it. Tap "Gone" if it has been taken.');
     if (listing.status === 'POSSIBLY_EXPIRED') throw new BadRequestException(CLOSED_TEXT.LISTING_NOT_CONFIRMED);
     if (listing.status !== 'ACTIVE') throw hidden;
     if (listing.sellerUserId === user.id) throw new BadRequestException('This is your own listing.');

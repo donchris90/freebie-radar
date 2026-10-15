@@ -10,7 +10,7 @@ interface AuthState {
   user: UserView | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName: string, countryCode?: string) => Promise<void>;
+  register: (email: string, password: string, displayName: string, countryCode?: string, referralCode?: string) => Promise<void>;
   logout: () => Promise<void>;
   logoutEverywhere: () => Promise<void>;
   /** Adopts a fresh token pair, e.g. after changing the password, so this device stays signed in. */
@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthState>(() => ({
     user, ready, refresh,
     login: async (email, password) => store(await api('/auth/login', { body: { email, password } })),
-    register: async (email, password, displayName, countryCode) => store(await api('/auth/register', { body: { email, password, displayName, ...(countryCode ? { countryCode } : {}) } })),
+    register: async (email, password, displayName, countryCode, referralCode) => store(await api('/auth/register', { body: { email, password, displayName, ...(countryCode ? { countryCode } : {}), ...(referralCode ? { referralCode } : {}) } })),
     logout: async () => {
       const rt = refreshToken.current;
       await clear();

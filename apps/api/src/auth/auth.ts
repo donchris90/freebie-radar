@@ -125,6 +125,8 @@ export class RegisterDto {
   @IsString() @Length(2, 50) displayName!: string;
   @IsOptional() @Matches(/^[A-Za-z]{2}$/) countryCode?: string;
   @IsOptional() @IsString() @MaxLength(64) timeZone?: string;
+  /** A member's invite code or an ambassador code. An unknown or switched-off code is ignored, never an error. */
+  @IsOptional() @Matches(/^[A-Za-z0-9]{4,20}$/) referralCode?: string;
 }
 export class LoginDto {
   @IsEmail() email!: string;
@@ -272,6 +274,7 @@ export class AuthService {
       // Generic message is a deliberate trade-off against enumeration; registration conflicts are still reported.
       throw new ConflictException('An account with this email already exists');
     }
+    const referral = dto.referralCode ? await this.repos.referrals.find(dto.referralCode.toUpperCase()) : null;
     const user = await this.repos.users.insert({
       id: randomUUID(),
       email,
@@ -298,6 +301,7 @@ export class AuthService {
       },
       emailVerifiedAt: null,
       tokenVersion: 0,
+      referredByCode: referral?.active ? referral.code : null,
       createdAt: new Date(),
     });
     // A failed email must not block sign-up; the user can ask for another code from Profile.

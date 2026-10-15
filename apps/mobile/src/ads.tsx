@@ -17,16 +17,20 @@ import { colors, space, type } from './theme';
  */
 export type Placement = 'home' | 'search';
 
+const ENABLED = process.env.EXPO_PUBLIC_ADS_ENABLED === 'true';
+const inExpoGo = Constants.appOwnership === 'expo' || (Constants as any).executionEnvironment === 'storeClient';
+
 type Lib = typeof import('react-native-google-mobile-ads');
 let lib: Lib | null | undefined;
 function native(): Lib | null {
+  // Never even load the library when ads are off or we are in Expo Go: merely requiring it runs native-module
+  // lookups at import time, which log errors (and can red-screen) where the native module does not exist.
+  if (!ENABLED || inExpoGo) return null;
   if (lib !== undefined) return lib;
   try { lib = require('react-native-google-mobile-ads') as Lib; } catch { lib = null; }
   return lib;
 }
 
-const ENABLED = process.env.EXPO_PUBLIC_ADS_ENABLED === 'true';
-const inExpoGo = Constants.appOwnership === 'expo';
 
 interface AdsState { ready: boolean; privacyChoices: boolean; showPrivacyChoices: () => Promise<void> }
 const Ctx = createContext<AdsState>({ ready: false, privacyChoices: false, showPrivacyChoices: async () => undefined });
@@ -73,8 +77,9 @@ function unitId(l: Lib): string {
 export function AdSlot({ placement }: { placement: Placement }) {
   const { ready } = useAds();
   const [failed, setFailed] = useState(false);
+  if (!ready || failed) return null;
   const l = native();
-  if (!ready || failed || !l) return null;
+  if (!l) return null;
   const { BannerAd, BannerAdSize } = l;
   return (
     <View accessibilityLabel="Advertisement" testID={`ad-${placement}`} style={{ marginHorizontal: space.lg, marginVertical: space.md, gap: 4 }}>

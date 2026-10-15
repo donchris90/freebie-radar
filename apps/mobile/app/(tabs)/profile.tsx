@@ -1,14 +1,15 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, ScrollView, Switch, View } from 'react-native';
+import { Alert, ScrollView, Share, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api, ApiError } from '../../src/api';
+import { api, ApiError, ReferralInfo } from '../../src/api';
 import { useAds } from '../../src/ads';
 import { useAuth } from '../../src/auth';
 import { Button, Chip, EmptyState, Panel } from '../../src/components/ui';
 import { colors, space, type } from '../../src/theme';
 import { Text } from '../../src/components/Text';
+import { useAsync } from '../../src/useAsync';
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: space.sm, gap: space.md }}><Text style={[type.body, { flex: 1 }]}>{label}</Text>{children}</View>
@@ -17,6 +18,7 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 export default function Profile() {
   const ads = useAds();
   const { user, logout, logoutEverywhere, refresh } = useAuth();
+  const referral = useAsync(() => (user ? api<ReferralInfo>('/me/referral') : Promise.resolve(null)), [user?.id]).data;
   const [busy, setBusy] = useState(false);
   const patch = async (body: object) => { try { await api('/me/preferences', { method: 'PATCH', body }); await refresh(); } catch (e) { Alert.alert('Could not save', (e as ApiError).message); } };
 
@@ -73,6 +75,14 @@ export default function Profile() {
           <Row label="Push notifications"><Switch accessibilityLabel="Push notifications" value={user.prefs.pushEnabled && user.prefs.pushTokenSet} onValueChange={(v) => (v ? enablePush() : patch({ pushEnabled: false }))} trackColor={{ true: colors.accent, false: colors.line }} disabled={busy} /></Row>
           <Button title="Reset personalisation" kind="secondary" onPress={async () => { try { await api('/me/personalisation/reset', { method: 'POST' }); Alert.alert('Reset', 'Your activity-based recommendations were cleared.'); } catch (e) { Alert.alert('Could not reset', (e as ApiError).message); } }} />
         </Panel>
+        {referral ? (
+          <Panel style={{ gap: space.sm }}>
+            <Text style={type.h2}>Invite friends</Text>
+            <Text style={type.body}>Your code: {referral.code}</Text>
+            <Text style={type.small}>{referral.signups} joined with your code{referral.verifiedSignups ? `, ${referral.verifiedSignups} verified` : ''}.</Text>
+            <Button icon="share-outline" title="Share my code" kind="secondary" onPress={() => void Share.share({ message: `Join me on Freebie Radar and find free stuff nearby. Use my invite code ${referral.code} when you sign up.` }).catch(() => undefined)} />
+          </Panel>
+        ) : null}
         <Panel style={{ gap: space.sm }}>
           <Text style={type.h2}>Privacy</Text>
           <Text style={type.body}>Your location is used only when the app is open, and only to find nearby listings. Other people only ever see an approximate location for your listings.</Text>
@@ -81,6 +91,7 @@ export default function Profile() {
           <Text style={type.h2}>Account safety</Text>
           <Button title="Change password" kind="secondary" onPress={() => router.push('/change-password')} />
           <Button icon="sparkles-outline" title={user.tier === 'FREE' ? 'Premium' : 'Your Premium plan'} kind="secondary" onPress={() => router.push('/premium')} />
+          <Button icon="lock-closed-outline" title="Reservations" kind="secondary" onPress={() => router.push('/claims')} />
           <Button icon="chatbubbles-outline" title="Messages" kind="secondary" onPress={() => router.push('/messages')} />
           {ads.privacyChoices ? <Button title="Ad privacy choices" kind="secondary" onPress={() => void ads.showPrivacyChoices()} /> : null}
           <Button title="Blocked sellers" kind="secondary" onPress={() => router.push('/blocked')} />

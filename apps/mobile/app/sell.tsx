@@ -21,7 +21,8 @@ export default function Sell() {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('furniture');
   const [condition, setCondition] = useState('GOOD');
-  const [free, setFree] = useState(false);
+  const [quick, setQuick] = useState(true);
+  const [free, setFree] = useState(true);
   const [price, setPrice] = useState('');
   const [days, setDays] = useState(14);
   const [externalUrl, setExternalUrl] = useState('');
@@ -64,22 +65,31 @@ export default function Sell() {
     if (uploading) return setError('Wait for your photos to finish uploading.');
     setBusy(true);
     try {
-      const l = await api<ListingView>('/listings', { body: { title: title.trim(), description: description.trim() || undefined, categoryKey: category, condition, price: free ? '0' : price.trim(), currency, lat: place.lat, lng: place.lng, locationLabel: place.label === 'Near me' ? undefined : place.label, availabilityDays: days, ...(photos.some((p) => p.url) ? { imageUrls: photos.flatMap((p) => (p.url ? [p.url] : [])) } : {}), ...(externalUrl.trim() ? { externalUrl: externalUrl.trim(), contactMethod: 'EXTERNAL_LINK' } : {}) } });
+      const l = await api<ListingView>('/listings', { body: { title: title.trim(), ...(quick ? {} : { description: description.trim() || undefined, categoryKey: category, condition }), price: free ? '0' : price.trim(), currency, lat: place.lat, lng: place.lng, locationLabel: place.label === 'Near me' ? undefined : place.label, availabilityDays: quick ? 14 : days, ...(photos.some((p) => p.url) ? { imageUrls: photos.flatMap((p) => (p.url ? [p.url] : [])) } : {}), ...(!quick && externalUrl.trim() ? { externalUrl: externalUrl.trim(), contactMethod: 'EXTERNAL_LINK' } : {}) } });
       router.replace(`/listing/${l.id}`);
     } catch (e) { setError((e as ApiError).message); } finally { setBusy(false); }
   };
 
   return (
     <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.lg }} keyboardShouldPersistTaps="handled">
+      <View style={{ flexDirection: 'row', gap: space.sm }}>
+        <Chip label="Quick post" selected={quick} onPress={() => setQuick(true)} />
+        <Chip label="Full details" selected={!quick} onPress={() => setQuick(false)} />
+      </View>
+      {quick ? <Text style={type.small}>Photo, title and price. That's all it takes. You can add details later.</Text> : null}
       <Field label="Title" value={title} onChangeText={setTitle} maxLength={120} placeholder="e.g. Oak desk, 120cm" />
+      {!quick ? <>
       <Field label="Description" value={description} onChangeText={setDescription} multiline maxLength={5000} placeholder="Condition, size, anything the buyer should know" />
       <View style={{ gap: space.sm }}><Text style={type.label}>Category</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>{CATEGORIES.map((c) => <Chip key={c} label={titleCase(c)} selected={category === c} onPress={() => setCategory(c)} />)}</View></View>
       <View style={{ gap: space.sm }}><Text style={type.label}>Condition</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>{CONDITIONS.map((c) => <Chip key={c} label={titleCase(c)} selected={condition === c} onPress={() => setCondition(c)} />)}</View></View>
+      </> : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={type.body}>Giving it away for free</Text><Switch accessibilityLabel="Free item" value={free} onValueChange={setFree} trackColor={{ true: colors.accent, false: colors.line }} /></View>
       {!free ? <Field label={`Price (${currency})`} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="25.00" /> : null}
       <View style={{ gap: space.sm }}><Text style={type.label}>Where is the item?</Text><LocationBar /></View>
+      {!quick ? <>
       <View style={{ gap: space.sm }}><Text style={type.label}>Keep listed for</Text><View style={{ flexDirection: 'row', gap: space.sm }}>{[7, 14, 30].map((d) => <Chip key={d} label={`${d} days`} selected={days === d} onPress={() => setDays(d)} />)}</View></View>
       <Field label="Original listing link (optional)" value={externalUrl} onChangeText={setExternalUrl} autoCapitalize="none" keyboardType="url" placeholder="https://…" hint="Only share links you are allowed to share. We link to the page; we do not copy it." />
+      </> : null}
       <View style={{ gap: space.sm }}>
         <Text style={type.label}>Photos ({photos.length}/{MAX_PHOTOS})</Text>
         {photos.length ? (

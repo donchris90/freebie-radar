@@ -87,6 +87,14 @@ export interface AppConfig {
   };
   /** Abuse limits for in-app messages. */
   messaging: { newConversationsPerDay: number; messagesPerHour: number; maxUnanswered: number; maxBodyChars: number };
+  /** "I'll take it" reservations. */
+  claims: { holdMinutes: number; pickupHours: number; maxActivePerUser: number };
+  /** Curb finds reported by members. */
+  spotted: { ttlHours: number; perDay: number };
+  /** Approved organisations importing listings in bulk. */
+  orgs: { maxRowsPerImport: number; maxListingsPerDay: number };
+  /** Public share pages. */
+  share: { appStoreUrl: string | null; playStoreUrl: string | null; appScheme: string };
   /** Sync tuning. */
   sync: { everyMs: number; pageSize: number; maxPages: number; maxRunMs: number };
   /** When true, only accounts with a verified email can post listings. Defaults to on in production. */
@@ -132,7 +140,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   const feedKeys = (env.PARTNER_FEEDS ?? '').split(',').map((k) => k.trim().toLowerCase()).filter(Boolean);
   const partnerFeeds = feedKeys.map((key): PartnerFeedConfig => {
-    if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(key) || key === 'direct' || key === 'external-link') throw new Error(`PARTNER_FEEDS: "${key}" is not a valid source key`);
+    if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(key) || key === 'direct' || key === 'external-link' || key === 'spotted') throw new Error(`PARTNER_FEEDS: "${key}" is not a valid source key`);
     const p = `PARTNER_FEED_${key.toUpperCase().replace(/-/g, '_')}_`;
     const url = env[`${p}URL`];
     if (!url) throw new Error(`${p}URL is required for partner feed "${key}"`);
@@ -193,6 +201,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jobs: { enabled: jobsEnabled, redisUrl, queueName: env.JOBS_QUEUE_NAME ?? 'freebie-radar-jobs', intervalOverrideMs: env.JOBS_INTERVAL_MS ? int(env.JOBS_INTERVAL_MS, 0) || null : null },
     partnerFeeds,
     billing: { provider: billingProvider as 'flutterwave' | null, flutterwave: { secretKey: flwKey, secretHash: flwHash, baseUrl: env.FLUTTERWAVE_BASE_URL ?? 'https://api.flutterwave.com' }, plans, graceDays: int(env.BILLING_GRACE_DAYS, 3), allowIos: env.BILLING_ALLOW_IOS === 'true' },
+    claims: { holdMinutes: int(env.CLAIM_HOLD_MINUTES, 120), pickupHours: int(env.CLAIM_PICKUP_HOURS, 24), maxActivePerUser: int(env.CLAIM_MAX_ACTIVE, 3) },
+    spotted: { ttlHours: int(env.SPOTTED_TTL_HOURS, 24), perDay: int(env.SPOTTED_PER_DAY, 10) },
+    orgs: { maxRowsPerImport: int(env.ORG_IMPORT_MAX_ROWS, 100), maxListingsPerDay: int(env.ORG_MAX_LISTINGS_PER_DAY, 300) },
+    share: { appStoreUrl: env.APP_STORE_URL || null, playStoreUrl: env.PLAY_STORE_URL || null, appScheme: env.APP_SCHEME || 'freebieradar' },
     messaging: { newConversationsPerDay: int(env.MSG_NEW_CONVERSATIONS_PER_DAY, 10), messagesPerHour: int(env.MSG_PER_HOUR, 30), maxUnanswered: int(env.MSG_MAX_UNANSWERED, 5), maxBodyChars: int(env.MSG_MAX_CHARS, 1000) },
     sync: { everyMs: int(env.SYNC_INTERVAL_MINUTES, 60) * 60_000, pageSize: int(env.SYNC_PAGE_SIZE, 100), maxPages: int(env.SYNC_MAX_PAGES, 50), maxRunMs: int(env.SYNC_MAX_RUN_SECONDS, 240) * 1000 },
     refreshTtlDays: int(env.REFRESH_TTL_DAYS, 30),

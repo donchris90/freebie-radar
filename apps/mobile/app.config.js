@@ -9,9 +9,26 @@ module.exports = ({ config }) => {
   const GOOGLE_TEST_IOS_APP_ID = 'ca-app-pub-3940256099942544~1458002511';
   const androidAppId = process.env.ADMOB_ANDROID_APP_ID || GOOGLE_TEST_ANDROID_APP_ID;
   const iosAppId = process.env.ADMOB_IOS_APP_ID || GOOGLE_TEST_IOS_APP_ID;
+
+  // If the ads package has not been installed yet (for example `npm install` was not run after pulling this
+  // change), Expo cannot even load the config. Skip the plugin with a loud warning instead, so `expo start`
+  // still works in Expo Go, where ads are off anyway. Native builds need the package: run `npm install`.
+  const plugins = [...(config.plugins || [])];
+  let adsInstalled = true;
+  try {
+    require.resolve('react-native-google-mobile-ads/package.json', { paths: [__dirname] });
+  } catch {
+    adsInstalled = false;
+    console.warn(
+      '\n[app.config] react-native-google-mobile-ads is not installed, so the ads plugin is skipped.\n' +
+        '             Run `npm install` from the repository root (C:\\freebie-radar) before making a native build.\n',
+    );
+  }
+  if (adsInstalled) plugins.push(['react-native-google-mobile-ads', { androidAppId, iosAppId }]);
+
   return {
     ...config,
-    plugins: [...(config.plugins || []), ['react-native-google-mobile-ads', { androidAppId, iosAppId }]],
+    plugins,
     android: {
       ...config.android,
       ...(mapsKey ? { config: { googleMaps: { apiKey: mapsKey } } } : {}),

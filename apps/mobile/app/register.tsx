@@ -16,6 +16,7 @@ export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [country, setCountry] = useState<string | null>(null);
+  const [invite, setInvite] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const countries = useAsync(() => api<{ items: Country[] }>('/countries'), []);
@@ -23,7 +24,7 @@ export default function Register() {
   const selected = country ?? options[0]?.code ?? null;
   const submit = async () => {
     setBusy(true); setError(null);
-    try { await register(email.trim(), password, name.trim(), selected ?? undefined); router.back(); } catch (e) { setError((e as ApiError).message); } finally { setBusy(false); }
+    try { await register(email.trim(), password, name.trim(), selected ?? undefined, invite.trim() || undefined); router.back(); } catch (e) { setError((e as ApiError).message); } finally { setBusy(false); }
   };
   return (
     <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.lg }} keyboardShouldPersistTaps="handled">
@@ -38,8 +39,9 @@ export default function Register() {
         </View>
         {countries.error ? <Text style={[type.small, { color: colors.danger }]}>Could not load countries. Check your connection and try again.</Text> : null}
       </View>
+      <Field label="Invite code (optional)" value={invite} onChangeText={(t) => setInvite(t.replace(/[^A-Za-z0-9]/g, '').toUpperCase())} autoCapitalize="characters" maxLength={20} hint="From a friend or a Freebie Radar ambassador. It's fine to leave this empty." />
       {error ? <Text accessibilityLiveRegion="polite" style={[type.body, { color: colors.danger }]}>{error}</Text> : null}
-      <Button title="Create account" busy={busy} disabled={!name || !email || password.length < 10 || !selected} onPress={submit} />
+      <Button title="Create account" busy={busy} disabled={!name || !email || password.length < 10 || !selected || (invite.length > 0 && invite.length < 4)} onPress={submit} />
       <Link href="/login" replace style={[type.body, { color: colors.accent, textAlign: 'center', fontFamily: 'DMSans_700Bold' }]}>Already have an account? Sign in</Link>
     </ScrollView>
   );

@@ -15,9 +15,11 @@ import type {
   MessageRec,
   MessageReportRec,
   BlockRec,
+  ClaimRec,
   CodeRec,
   ModerationRec,
   PaymentRec,
+  ReferralCodeRec,
   RefreshRec,
   ReportRec,
   ResaleRec,
@@ -26,7 +28,7 @@ import type {
   SyncRunRec,
   UserRec,
 } from '../../domain/models';
-import type { ListingSearchFilter, Repos } from '../../domain/ports';
+import type { ClaimTally, ListingSearchFilter, Repos } from '../../domain/ports';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -50,6 +52,8 @@ export function createMemoryRepos(): Repos {
   const payments = new Map<string, PaymentRec>();
   const billingEvents = new Map<string, BillingEventRec>();
   const conversations = new Map<string, ConversationRec>();
+  const claims = new Map<string, ClaimRec>();
+  const referralCodes = new Map<string, ReferralCodeRec>();
   const messages: MessageRec[] = [];
   const messageReports = new Map<string, MessageReportRec>();
   const sources = new Map<string, SourceRec>();
@@ -153,6 +157,9 @@ export function createMemoryRepos(): Repos {
         users.set(id, next);
         return clone(next);
       },
+      async idsReferredBy(code, limit) {
+        return [...users.values()].filter((u) => u.referredByCode === code).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, limit).map((u) => ({ id: u.id, emailVerifiedAt: u.emailVerifiedAt }));
+      },
     },
 
     listings: {
@@ -192,6 +199,13 @@ export function createMemoryRepos(): Repos {
       },
       async countBySellerSince(sellerId, since) {
         return [...listings.values()].filter((l) => l.sellerUserId === sellerId && l.postedAt >= since).length;
+      },
+      async countBySellerSourceSince(sellerId, sourceKey, since) {
+        return [...listings.values()].filter((l) => l.sellerUserId === sellerId && l.sourceKey === sourceKey && l.postedAt >= since).length;
+      },
+      async countBySellerIds(ids) {
+        const set = new Set(ids);
+        return [...listings.values()].filter((l) => l.sellerUserId && set.has(l.sellerUserId) && l.status !== 'REMOVED' && l.status !== 'UNDER_REVIEW').length;
       },
       async countSameContentBySeller(sellerId, hash, since) {
         return [...listings.values()].filter((l) => l.sellerUserId === sellerId && l.contentHash === hash && l.postedAt >= since).length;
@@ -298,6 +312,62 @@ export function createMemoryRepos(): Repos {
       async setStatusForListing(listingId, status) {
         for (const r of reports.values()) if (r.listingId === listingId && r.status === 'OPEN') r.status = status;
       },
+    },
+
+    claims: {
+      async insertActive(c) {
+        if ([...claims.values()].some((x) => x.listingId === c.listingId && (x.status === 'HELD' || x.status === 'CONFIRMED'))) return null;
+        claims.set(c.id, clone(c));
+        return clone(c);
+      },
+      async findById(id) { const c = claims.get(id); return c ? clone(c) : null; },
+      async activeForListing(listingId) {
+        const c = [...claims.values()].find((x) => x.listingId === listingId && (x.status === 'HELD' || x.status === 'CONFIRMED'));
+        return c ? clone(c) : null;
+      },
+      async activeListingIds(ids) {
+        const set = new Set(ids);
+        return [...new Set([...claims.values()].filter((x) => set.has(x.listingId) && (x.status === 'HELD' || x.status === 'CONFIRMED')).map((x) => x.listingId))];
+      },
+      async countActiveByClaimer(claimerId) {
+        return [...claims.values()].filter((x) => x.claimerId === claimerId && (x.status === 'HELD' || x.status === 'CONFIRMED')).length;
+      },
+      async transition(id, from, patch) {
+        const c = claims.get(id);
+        if (!c || !from.includes(c.status)) return null;
+        Object.assign(c, clone(patch));
+        return clone(c);
+      },
+      async listForClaimer(userId, limit) { return [...claims.values()].filter((c) => c.claimerId === userId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, limit).map(clone); },
+      async listForGiver(userId, limit) { return [...claims.values()].filter((c) => c.giverId === userId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, limit).map(clone); },
+      async listActive(limit) {
+        return [...claims.values()].filter((c) => c.status === 'HELD' || c.status === 'CONFIRMED').sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(0, limit).map(clone);
+      },
+      async tally(userId): Promise<ClaimTally> {
+        const all = [...claims.values()];
+        return {
+          collected: all.filter((c) => c.claimerId === userId && c.status === 'COLLECTED').length,
+          noShow: all.filter((c) => c.claimerId === userId && c.status === 'NO_SHOW').length,
+          lateCancel: all.filter((c) => c.claimerId === userId && c.status === 'CANCELLED' && c.endedBy === 'CLAIMER' && c.confirmedAt !== null).length,
+          given: all.filter((c) => c.giverId === userId && c.status === 'COLLECTED').length,
+        };
+      },
+      async countCollectedForGivers(ids) {
+        const set = new Set(ids);
+        return [...claims.values()].filter((c) => set.has(c.giverId) && c.status === 'COLLECTED').length;
+      },
+    },
+
+    referrals: {
+      async insert(r) {
+        if (referralCodes.has(r.code)) return null;
+        referralCodes.set(r.code, clone(r));
+        return clone(r);
+      },
+      async find(code) { const r = referralCodes.get(code); return r ? clone(r) : null; },
+      async findByOwner(userId) { const r = [...referralCodes.values()].find((x) => x.ownerUserId === userId); return r ? clone(r) : null; },
+      async list() { return [...referralCodes.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(clone); },
+      async setActive(code, active) { const r = referralCodes.get(code); if (!r) return null; r.active = active; return clone(r); },
     },
 
     conversations: {

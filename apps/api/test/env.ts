@@ -17,3 +17,5 @@ if (process.env.TEST_DATABASE_URL) {
 
 // Uploaded photos go to a throwaway folder.
 process.env.UPLOAD_DIR = require('path').join(require('os').tmpdir(), `freebie-radar-test-uploads-${process.pid}`);
+process.env.CLAIM_THROTTLE_LIMIT = '10000';
+process.env.ORG_IMPORT_THROTTLE_LIMIT = '10000';

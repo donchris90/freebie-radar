@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Image, Linking, Modal, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
-import { api, ApiError, ListingView, titleCase } from '../../src/api';
+import { Alert, Image, Linking, Modal, Pressable, ScrollView, Share, View, useWindowDimensions } from 'react-native';
+import { api, ApiError, ClaimInfo, ListingView, shareUrl, titleCase } from '../../src/api';
 import { useAuth } from '../../src/auth';
 import { Button, Chip, ErrorState, LoadingState, Panel, PriceTag } from '../../src/components/ui';
 import { useSaved } from '../../src/saved';
@@ -17,6 +17,7 @@ export default function ListingDetail() {
   const { ids, toggle } = useSaved();
   const { width } = useWindowDimensions();
   const state = useAsync(() => api<ListingView>(`/listings/${id}`), [id, user?.id]);
+  const claim = useAsync(() => (user ? api<ClaimInfo>(`/listings/${id}/claim`) : Promise.resolve(null)), [id, user?.id]);
   const [reporting, setReporting] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -30,8 +31,11 @@ export default function ListingDetail() {
   const guard = async (fn: () => Promise<unknown>, ok?: string) => {
     if (!user) { router.push('/login'); return; }
     setBusy(true);
-    try { await fn(); if (ok) Alert.alert(ok); state.reload(); } catch (e) { Alert.alert('Something went wrong', (e as ApiError).message); } finally { setBusy(false); }
+    try { await fn(); if (ok) Alert.alert(ok); state.reload(); claim.reload(); } catch (e) { Alert.alert('Something went wrong', (e as ApiError).message); } finally { setBusy(false); }
   };
+  const c = claim.data;
+  const spotted = l.kind === 'SPOTTED';
+  const share = () => void Share.share({ message: `${l.title} (${l.price.label}) on Freebie Radar: ${shareUrl(l.id)}` }).catch(() => undefined);
   const openOriginal = () => Alert.alert('Open the original listing?', 'This leaves Freebie Radar and opens a page we do not control or verify.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Open', onPress: () => void Linking.openURL(l.externalUrl!) }]);
 
   return (
@@ -47,6 +51,8 @@ export default function ListingDetail() {
       <View style={{ padding: space.lg, gap: space.md }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
           {l.sponsored ? <Chip tone="sponsored" label="Sponsored" /> : null}
+          {spotted ? <Chip tone="muted" icon="eye-outline" label="Spotted by a member" /> : null}
+          {l.reserved ? <Chip tone="deal" icon="lock-closed" label="Reserved" /> : null}
           <Chip label={titleCase(l.condition)} />
           <Chip label={titleCase(l.category)} />
         </View>
@@ -92,13 +98,36 @@ export default function ListingDetail() {
 
         {l.safetyGuidance ? <View style={{ gap: 4 }}><Text style={type.h2}>Stay safe</Text>{l.safetyGuidance.map((x) => <Text key={x} style={type.body}>• {x}</Text>)}</View> : null}
 
+        {l.giver && l.giver.itemsGiven > 0 ? <Text style={type.small}>This member has given away {l.giver.itemsGiven} item{l.giver.itemsGiven === 1 ? '' : 's'} through Freebie Radar.</Text> : null}
+        {spotted ? <Text style={type.small}>Someone saw this outside and shared it. It may be gone by the time you arrive, and it disappears on its own after a day.</Text> : null}
+
+        {c?.mine ? (
+          <Panel>
+            <Text style={type.h2}>{c.mine.status === 'CONFIRMED' ? 'Confirmed: arrange pickup' : 'Reserved for you'}</Text>
+            <Text style={type.body}>{c.mine.status === 'CONFIRMED' ? 'The giver confirmed. Message them to agree a time and a public pickup spot.' : 'We are holding it while the giver confirms. It is released automatically if nothing happens.'}</Text>
+            <Button title="See my reservations" kind="secondary" onPress={() => router.push('/claims')} />
+          </Panel>
+        ) : null}
+        {c?.forGiver ? (
+          <Panel>
+            <Text style={type.h2}>{c.forGiver.other.displayName} would like this</Text>
+            {c.forGiver.claimerReliability ? <Text style={type.body}>{c.forGiver.claimerReliability.text}</Text> : null}
+            <Button title="Manage reservation" onPress={() => router.push('/claims')} />
+          </Panel>
+        ) : null}
+
         <View style={{ gap: space.sm }}>
+          {l.claimable && !l.isOwner && !c?.mine && !l.reserved ? <Button icon="hand-left-outline" title="I'll take it" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/claims`, { method: 'POST' }), 'Reserved. The giver has been told. It is held for you for a short time while they confirm.')} /> : null}
+          {l.reserved && !l.isOwner && !c?.mine ? <Text style={type.small}>Someone has reserved this. If they do not collect it, it becomes available again.</Text> : null}
+          {spotted && !l.isOwner ? <Button title="It's gone" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/gone`, { method: 'POST' }), 'Thanks for letting others know.')} /> : null}
+          <Button icon="share-outline" title="Share" kind="secondary" onPress={share} />
           {l.externalUrl ? <Button title="Open original listing" onPress={openOriginal} /> : null}
           {l.messageable && !l.isOwner ? <Button icon="chatbubble-ellipses-outline" title="Message seller" onPress={() => (user ? router.push({ pathname: '/conversation/[id]', params: { id: 'new', listingId: l.id, title: l.title } }) : router.push('/login'))} /> : null}
-          {!l.externalUrl && !l.messageable && !l.isOwner ? <Text style={type.small}>This listing is not open for messages right now.</Text> : null}
+          {!l.externalUrl && !l.messageable && !l.isOwner && !spotted ? <Text style={type.small}>This listing is not open for messages right now.</Text> : null}
           <Button icon={saved ? 'heart' : 'heart-outline'} title={saved ? 'Saved (tap to remove)' : 'Save listing'} kind="secondary" busy={busy} onPress={() => guard(() => toggle(l.id))} />
           {l.price.minor !== null ? <Button title="Estimate resale profit" kind="secondary" onPress={() => router.push({ pathname: '/resale', params: { purchase: String(l.price.minor! / 100), currency: l.price.currency } })} /> : null}
           {l.isOwner ? <>
+            {spotted ? <Button title="It's gone" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/gone`, { method: 'POST' }), 'Closed.')} /> : null}
             <Button title="Still available — confirm" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/confirm`, { method: 'POST' }), 'Thanks, availability confirmed.')} />
             <Button title="Mark as unavailable" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/unavailable`, { method: 'POST' }), 'Marked as unavailable.')} />
           </> : <>

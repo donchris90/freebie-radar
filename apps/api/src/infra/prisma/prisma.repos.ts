@@ -10,6 +10,7 @@ import type {
   AppealRec,
   AuditRec,
   BillingEventRec,
+  ClaimRec,
   ConversationRec,
   CountryRec,
   DeliveryRec,
@@ -18,6 +19,7 @@ import type {
   MessageReportRec,
   ModerationRec,
   PaymentRec,
+  ReferralCodeRec,
   ReportRec,
   ResaleRec,
   UserPrefs,
@@ -82,6 +84,7 @@ function toUser(r: Row): UserRec {
     locale: r.locale,
     emailVerifiedAt: r.emailVerifiedAt ?? null,
     tokenVersion: r.tokenVersion ?? 0,
+    referredByCode: r.referredByCode ?? null,
     createdAt: r.createdAt,
     prefs: {
       distanceUnit: p?.distanceUnit === 'km' ? 'km' : 'mi',
@@ -281,10 +284,25 @@ const toAppeal = (r: Row): AppealRec => ({
 });
 
 function sourceKind(key: string): 'DIRECT_SUBMISSION' | 'EXTERNAL_LINK' | 'API_PROVIDER' {
-  if (key === 'direct') return 'DIRECT_SUBMISSION';
+  if (key === 'direct' || key === 'spotted') return 'DIRECT_SUBMISSION';
   if (key === 'external-link') return 'EXTERNAL_LINK';
   return 'API_PROVIDER';
 }
+
+const toClaim = (r: Row): ClaimRec => ({
+  id: r.id,
+  listingId: r.listingId,
+  claimerId: r.claimerId,
+  giverId: r.giverId,
+  status: r.status,
+  holdExpiresAt: r.holdExpiresAt,
+  confirmedAt: r.confirmedAt ?? null,
+  resolvedAt: r.resolvedAt ?? null,
+  endedBy: r.endedBy ?? null,
+  createdAt: r.createdAt,
+});
+
+const toReferral = (r: Row): ReferralCodeRec => ({ code: r.code, label: r.label, kind: r.kind, ownerUserId: r.ownerUserId ?? null, active: r.active, createdAt: r.createdAt });
 
 const countMap = (rows: Row[], key: string): Record<string, number> => {
   const out: Record<string, number> = {};
@@ -462,6 +480,7 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
             locale: u.locale,
             emailVerifiedAt: u.emailVerifiedAt,
             tokenVersion: u.tokenVersion,
+            referredByCode: u.referredByCode ?? null,
             pushToken: u.prefs.pushToken,
             createdAt: u.createdAt,
             preference: { create: prefsData(u.prefs) },
@@ -508,6 +527,103 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
           }
           const row = await db.user.update({ where: { id }, data, include: USER_INCLUDE });
           return toUser(row);
+        } catch (e) {
+          if (isNotFound(e)) return null;
+          throw e;
+        }
+      },
+      async idsReferredBy(code, limit) {
+        const rows: Row[] = await db.user.findMany({ where: { referredByCode: code }, select: { id: true, emailVerifiedAt: true }, orderBy: { createdAt: 'desc' }, take: limit });
+        return rows.map((r) => ({ id: r.id, emailVerifiedAt: r.emailVerifiedAt ?? null }));
+      },
+    },
+
+    claims: {
+      async insertActive(c) {
+        try {
+          // activeListingId is unique: while it holds this listing's id, no second active claim can be created.
+          return toClaim(await db.claim.create({ data: { id: c.id, listingId: c.listingId, claimerId: c.claimerId, giverId: c.giverId, status: c.status, activeListingId: c.listingId, holdExpiresAt: c.holdExpiresAt, confirmedAt: c.confirmedAt, resolvedAt: c.resolvedAt, endedBy: c.endedBy, createdAt: c.createdAt } }));
+        } catch (e) {
+          if (isUniqueViolation(e)) return null;
+          throw e;
+        }
+      },
+      async findById(id) {
+        const r = await db.claim.findUnique({ where: { id } });
+        return r ? toClaim(r) : null;
+      },
+      async activeForListing(listingId) {
+        const r = await db.claim.findFirst({ where: { listingId, status: { in: ['HELD', 'CONFIRMED'] } } });
+        return r ? toClaim(r) : null;
+      },
+      async activeListingIds(ids) {
+        if (!ids.length) return [];
+        const rows: Row[] = await db.claim.findMany({ where: { listingId: { in: ids }, status: { in: ['HELD', 'CONFIRMED'] } }, select: { listingId: true } });
+        return [...new Set(rows.map((r) => r.listingId as string))];
+      },
+      async countActiveByClaimer(claimerId) {
+        return db.claim.count({ where: { claimerId, status: { in: ['HELD', 'CONFIRMED'] } } });
+      },
+      async transition(id, from, patch) {
+        const data: any = { ...patch };
+        delete data.id;
+        // Leaving HELD/CONFIRMED frees the listing for the next person.
+        if (patch.status && patch.status !== 'HELD' && patch.status !== 'CONFIRMED') data.activeListingId = null;
+        const res = await db.claim.updateMany({ where: { id, status: { in: from } }, data });
+        if (res.count !== 1) return null;
+        return toClaim(await db.claim.findUnique({ where: { id } }));
+      },
+      async listForClaimer(userId, limit) {
+        const rows: Row[] = await db.claim.findMany({ where: { claimerId: userId }, orderBy: { createdAt: 'desc' }, take: limit });
+        return rows.map(toClaim);
+      },
+      async listForGiver(userId, limit) {
+        const rows: Row[] = await db.claim.findMany({ where: { giverId: userId }, orderBy: { createdAt: 'desc' }, take: limit });
+        return rows.map(toClaim);
+      },
+      async listActive(limit) {
+        const rows: Row[] = await db.claim.findMany({ where: { status: { in: ['HELD', 'CONFIRMED'] } }, orderBy: { createdAt: 'asc' }, take: limit });
+        return rows.map(toClaim);
+      },
+      async tally(userId) {
+        const [collected, noShow, lateCancel, given] = await Promise.all([
+          db.claim.count({ where: { claimerId: userId, status: 'COLLECTED' } }),
+          db.claim.count({ where: { claimerId: userId, status: 'NO_SHOW' } }),
+          db.claim.count({ where: { claimerId: userId, status: 'CANCELLED', endedBy: 'CLAIMER', confirmedAt: { not: null } } }),
+          db.claim.count({ where: { giverId: userId, status: 'COLLECTED' } }),
+        ]);
+        return { collected, noShow, lateCancel, given };
+      },
+      async countCollectedForGivers(ids) {
+        if (!ids.length) return 0;
+        return db.claim.count({ where: { giverId: { in: ids }, status: 'COLLECTED' } });
+      },
+    },
+
+    referrals: {
+      async insert(r) {
+        try {
+          return toReferral(await db.referralCode.create({ data: { code: r.code, label: r.label, kind: r.kind, ownerUserId: r.ownerUserId, active: r.active, createdAt: r.createdAt } }));
+        } catch (e) {
+          if (isUniqueViolation(e)) return null;
+          throw e;
+        }
+      },
+      async find(code) {
+        const r = await db.referralCode.findUnique({ where: { code } });
+        return r ? toReferral(r) : null;
+      },
+      async findByOwner(userId) {
+        const r = await db.referralCode.findFirst({ where: { ownerUserId: userId } });
+        return r ? toReferral(r) : null;
+      },
+      async list() {
+        const rows: Row[] = await db.referralCode.findMany({ orderBy: { createdAt: 'asc' } });
+        return rows.map(toReferral);
+      },
+      async setActive(code, active) {
+        try {
+          return toReferral(await db.referralCode.update({ where: { code }, data: { active } }));
         } catch (e) {
           if (isNotFound(e)) return null;
           throw e;
@@ -653,6 +769,13 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
       },
       async countBySellerSince(sellerId, since) {
         return db.listing.count({ where: { sellerUserId: sellerId, postedAt: { gte: since } } });
+      },
+      async countBySellerSourceSince(sellerId, sourceKey, since) {
+        return db.listing.count({ where: { sellerUserId: sellerId, source: { key: sourceKey }, postedAt: { gte: since } } });
+      },
+      async countBySellerIds(ids) {
+        if (!ids.length) return 0;
+        return db.listing.count({ where: { sellerUserId: { in: ids }, status: { notIn: ['REMOVED', 'UNDER_REVIEW'] } } });
       },
       async countSameContentBySeller(sellerId, hash, since) {
         return db.listing.count({ where: { sellerUserId: sellerId, contentHash: hash, postedAt: { gte: since } } });

@@ -130,3 +130,6 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 - Mobile: not run on a device. The map uses `react-native-maps` (Android release builds need a Google Maps API key; Expo Go on iOS uses Apple Maps). Push registration needs an Expo `projectId` in `app.json` (`extra.eas.projectId`) and a real device; without it the app says push is not configured instead of pretending.
 - Mobile location: one-shot foreground location on request, or a manually geocoded place. There is no background tracking. Manual geocoding uses the platform geocoder and is unverified.
 - The dashboard shows only counts the API actually has. Provider failures, retention, revenue and sponsored-performance panels need the data sources behind them.
+
+## Community features
+Reservations ("I'll take it"), Spotted curb finds, public share pages, referral/ambassador codes, organisation CSV import and a pickup reliability signal. See `docs/SETUP_WINDOWS.md` for settings and how each behaves.

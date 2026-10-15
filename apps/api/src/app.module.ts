@@ -24,6 +24,10 @@ import { JsonFeedProvider } from './providers/json-feed';
 import { RegisteredSource, SOURCES, SyncService } from './sync/sync.service';
 import { UploadsController } from './storage/uploads.controller';
 import { ListingsController, ListingsService } from './listings/listings';
+import { SpottedController, SpottedService } from './listings/spotted';
+import { ClaimsController, ClaimsService } from './claims/claims';
+import { OrganisationController, OrganisationService, ReferralController, ReferralService } from './growth/growth';
+import { ShareController } from './share/share';
 
 const config = loadConfig();
 
@@ -48,7 +52,7 @@ class HealthController {
     JwtModule.register({ global: true, secret: config.jwtSecret, signOptions: { expiresIn: config.jwtExpiresIn as never } }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: config.throttleLimit }]),
   ],
-  controllers: [HealthController, AuthController, ListingsController, EngagementController, AlertsController, AdminController, AppealController, CountriesController, AdminCountriesController, UploadsController, MessagingController, MessageModerationController, BillingController, BillingAdminController],
+  controllers: [HealthController, AuthController, ListingsController, EngagementController, AlertsController, AdminController, AppealController, CountriesController, AdminCountriesController, UploadsController, MessagingController, MessageModerationController, BillingController, BillingAdminController, ClaimsController, SpottedController, ShareController, ReferralController, OrganisationController],
   providers: [
     { provide: APP_CONFIG, useValue: config },
     { provide: PRISMA, useFactory: (): PrismaClient | null => (config.store === 'prisma' ? new PrismaClient() : null) },
@@ -84,6 +88,10 @@ class HealthController {
     },
     BillingService,
     MessagingService,
+    ClaimsService,
+    SpottedService,
+    ReferralService,
+    OrganisationService,
     AuthService,
     ListingsService,
     AlertsService,

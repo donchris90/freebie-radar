@@ -31,9 +31,11 @@ export function ListingCard({ item, width }: { item: ListingView; width?: number
         <Text numberOfLines={2} style={s.title}>{item.title}</Text>
         <Text numberOfLines={1} style={type.small}>{[item.distance?.label, titleCase(item.condition)].filter(Boolean).join(' · ')}</Text>
         <Text numberOfLines={1} style={[type.small, item.freshness.stale && { color: colors.caution }]}>{item.freshness.label}</Text>
-        {item.sponsored || item.risk.level !== 'NO_MAJOR_SIGNALS' ? (
+        {item.sponsored || item.reserved || item.kind === 'SPOTTED' || item.risk.level !== 'NO_MAJOR_SIGNALS' ? (
           <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
             {item.sponsored ? <Chip label="Sponsored" tone="sponsored" /> : null}
+            {item.reserved ? <Chip label="Reserved" tone="deal" icon="lock-closed" /> : null}
+            {item.kind === 'SPOTTED' ? <Chip label="Spotted" tone="muted" icon="eye-outline" /> : null}
             {item.risk.level !== 'NO_MAJOR_SIGNALS' ? <Chip tone="caution" label={item.risk.label} /> : null}
           </View>
         ) : null}

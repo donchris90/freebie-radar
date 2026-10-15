@@ -5,6 +5,8 @@ import type {
   AuditRec,
   BillingEventRec,
   BlockRec,
+  ClaimRec,
+  ClaimStatus,
   CodePurpose,
   CodeRec,
   Condition,
@@ -17,6 +19,7 @@ import type {
   MessageReportRec,
   ModerationRec,
   PaymentRec,
+  ReferralCodeRec,
   RefreshRec,
   ReportRec,
   ReportReason,
@@ -66,6 +69,10 @@ export interface ListingRepo {
   comparablesFor(l: ListingRec): Promise<Comparable[]>;
   listForExpiry(): Promise<ListingRec[]>;
   findBySourceExternal(sourceKey: string, externalId: string): Promise<ListingRec | null>;
+  /** How many listings this seller created from one source since a moment (used for the daily "spotted" cap). */
+  countBySellerSourceSince(sellerId: string, sourceKey: string, since: Date): Promise<number>;
+  /** Listings by these sellers that are or were genuinely live (not removed, not held for review). */
+  countBySellerIds(sellerIds: string[]): Promise<number>;
 }
 
 export interface SourceRepo {
@@ -89,6 +96,8 @@ export interface UserRepo {
   findById(id: string): Promise<UserRec | null>;
   findByEmail(email: string): Promise<UserRec | null>;
   update(id: string, patch: Partial<UserRec>): Promise<UserRec | null>;
+  /** People who signed up with a referral code (newest first, capped). */
+  idsReferredBy(code: string, limit: number): Promise<{ id: string; emailVerifiedAt: Date | null }[]>;
 }
 
 export interface TokenRepo {
@@ -156,6 +165,43 @@ export interface ConversationRepo {
   findReport(id: string): Promise<MessageReportRec | null>;
   listReports(status: MessageReportRec['status'], offset: number, limit: number): Promise<{ items: MessageReportRec[]; total: number }>;
   setReportStatus(id: string, status: MessageReportRec['status']): Promise<void>;
+}
+
+/** What a person has done as a collector and as a giver. Feeds the reliability label. */
+export interface ClaimTally {
+  collected: number;
+  noShow: number;
+  /** The person cancelled after the giver had confirmed. */
+  lateCancel: number;
+  /** Items this person gave away (claims they confirmed as collected). */
+  given: number;
+}
+
+export interface ClaimRepo {
+  /** Null when the listing already has an active (held or confirmed) claim: only one person can reserve an item. */
+  insertActive(c: ClaimRec): Promise<ClaimRec | null>;
+  findById(id: string): Promise<ClaimRec | null>;
+  activeForListing(listingId: string): Promise<ClaimRec | null>;
+  /** Which of these listings currently have an active claim. */
+  activeListingIds(listingIds: string[]): Promise<string[]>;
+  countActiveByClaimer(claimerId: string): Promise<number>;
+  /** Atomic: applies the patch only if the claim is still in one of `from`. Returns the updated claim for the one caller that won. */
+  transition(id: string, from: ClaimStatus[], patch: Partial<Omit<ClaimRec, 'id'>>): Promise<ClaimRec | null>;
+  listForClaimer(userId: string, limit: number): Promise<ClaimRec[]>;
+  listForGiver(userId: string, limit: number): Promise<ClaimRec[]>;
+  /** Active claims, oldest first, for the expiry job. */
+  listActive(limit: number): Promise<ClaimRec[]>;
+  tally(userId: string): Promise<ClaimTally>;
+  countCollectedForGivers(giverIds: string[]): Promise<number>;
+}
+
+export interface ReferralRepo {
+  /** Null when the code already exists. */
+  insert(r: ReferralCodeRec): Promise<ReferralCodeRec | null>;
+  find(code: string): Promise<ReferralCodeRec | null>;
+  findByOwner(userId: string): Promise<ReferralCodeRec | null>;
+  list(): Promise<ReferralCodeRec[]>;
+  setActive(code: string, active: boolean): Promise<ReferralCodeRec | null>;
 }
 
 export interface BillingRepo {
@@ -247,6 +293,8 @@ export interface Repos {
   saved: SavedRepo;
   reports: ReportRepo;
   conversations: ConversationRepo;
+  claims: ClaimRepo;
+  referrals: ReferralRepo;
   billing: BillingRepo;
   alerts: AlertRepo;
   resale: ResaleRepo;
