@@ -118,6 +118,7 @@ export interface ListingView {
   contactMethod: string;
   safetyGuidance?: string[];
   isOwner?: boolean;
+  messageable: boolean;
 }
 export interface Page<T> { items: T[]; total: number; nextCursor: string | null }
 
@@ -135,3 +136,12 @@ export interface AlertView {
 export const CATEGORIES = ['furniture', 'electronics', 'household', 'clothing', 'baby', 'tools', 'books', 'toys', 'sports', 'garden', 'other'];
 export const CONDITIONS = ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'POOR', 'FOR_PARTS'];
 export const titleCase = (s: string) => s.toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+
+export interface ConversationSummary {
+  id: string; role: 'BUYER' | 'SELLER';
+  listing: { id: string; title: string; status: string; image: string | null };
+  other: { displayName: string };
+  lastMessage: { preview: string; at: string; mine: boolean } | null;
+  unread: boolean; canReply: boolean; closedReason: string | null; closedMessage: string | null;
+}
+export interface ChatMessage { id: string; mine: boolean; body: string; at: string; caution?: string }

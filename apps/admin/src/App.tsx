@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setRefreshToken, setToken, signOut, Stats } from './api';
 
-type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'sources' | 'jobs';
+type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'messages' | 'sources' | 'jobs';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -288,6 +288,51 @@ function Jobs() {
   );
 }
 
+interface MsgReportRow {
+  report: { id: string; reason: string; details: string | null; status: string; createdAt: string };
+  reporter: { displayName: string } | null; sender: { id: string; displayName: string; status: string } | null;
+  listing: { title: string } | null;
+  message: { body: string; flagged: boolean; at: string } | null;
+  context: { id: string; fromReportedUser: boolean; body: string; at: string }[];
+}
+
+function MessageReports() {
+  const [status, setStatus] = useState<'OPEN' | 'ACTIONED' | 'DISMISSED'>('OPEN');
+  const q = useLoad(() => api<{ items: MsgReportRow[]; total: number }>(`/admin/message-reports?status=${status}&limit=20`), [status]);
+  const [note, setNote] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+  const act = async (id: string, action: 'ACTION' | 'DISMISS') => {
+    const n = (note[id] ?? '').trim();
+    if (n.length < 3) { setMsg('Enter a note of at least 3 characters. It is recorded in the audit log.'); return; }
+    setMsg(null);
+    try { await api(`/admin/message-reports/${id}/resolve`, { body: { action, note: n } }); q.reload(); } catch (e) { setMsg((e as Error).message); }
+  };
+  return (
+    <section className="card">
+      <div className="row segmented" role="group" aria-label="Report status">{(['OPEN', 'ACTIONED', 'DISMISSED'] as const).map((s) => <button key={s} aria-pressed={status === s} onClick={() => setStatus(s)}>{s.toLowerCase()}</button>)}</div>
+      <p className="muted">Staff only see a message someone reported, with the few messages before it. Use Users to suspend an account.</p>
+      <Status {...q} retry={q.reload} />
+      {msg ? <p className="err" role="alert">{msg}</p> : null}
+      {q.data && q.data.items.length === 0 ? <p className="muted">Nothing here.</p> : null}
+      {q.data?.items.map((r) => (
+        <div className="item" key={r.report.id}>
+          <div className="row inline"><span className="pill warn">{r.report.reason.toLowerCase().replace(/_/g, ' ')}</span> <span className="muted">{new Date(r.report.createdAt).toLocaleString()} · reported by {r.reporter?.displayName ?? 'unknown'} · about “{r.listing?.title ?? 'removed listing'}”</span></div>
+          {r.report.details ? <p>{r.report.details}</p> : null}
+          <p><strong>{r.sender?.displayName ?? 'Unknown'}</strong> {r.sender && r.sender.status !== 'ACTIVE' ? <span className="pill">{r.sender.status.toLowerCase()}</span> : null} wrote: “{r.message?.body}” {r.message?.flagged ? <span className="pill warn">auto-flagged</span> : null}</p>
+          {r.context.length > 1 ? <details><summary className="muted">Earlier messages</summary>{r.context.map((c) => <div key={c.id} className="muted">{c.fromReportedUser ? 'Reported user' : 'Other person'}: {c.body}</div>)}</details> : null}
+          {status === 'OPEN' ? (
+            <div className="row" style={{ marginTop: 8 }}>
+              <input aria-label="Note" placeholder="Note (required, audited)" style={{ maxWidth: 320 }} value={note[r.report.id] ?? ''} onChange={(e) => setNote({ ...note, [r.report.id]: e.target.value })} />
+              <button className="primary" onClick={() => act(r.report.id, 'ACTION')}>Mark actioned</button>
+              <button onClick={() => act(r.report.id, 'DISMISS')}>Dismiss</button>
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 interface SourceRow {
   key: string; name: string; enabled: boolean; configured: boolean; setup: string | null; countries: string[];
   attribution: string | null; permissionNote: string | null; expireAfterHours: number; retireAfterHours: number;
@@ -374,7 +419,7 @@ export function App() {
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
-  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['sources', 'Sources', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['messages', 'Messages', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['sources', 'Sources', isAdmin], ['jobs', 'Jobs', isAdmin]];
   const visible = tabs.filter(([, , show]) => show);
   const current = visible.find(([k]) => k === tab)?.[1] ?? '';
   return (
@@ -393,6 +438,7 @@ export function App() {
         {tab === 'overview' && isAdmin ? <Overview /> : null}
         {tab === 'reports' ? <Reports /> : null}
         {tab === 'appeals' ? <Appeals /> : null}
+        {tab === 'messages' ? <MessageReports /> : null}
         {tab === 'users' && isAdmin ? <Users /> : null}
         {tab === 'countries' && isAdmin ? <Countries /> : null}
         {tab === 'audit' && isAdmin ? <Audit /> : null}

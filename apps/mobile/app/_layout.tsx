@@ -34,6 +34,8 @@ export default function RootLayout() {
             <Stack.Screen name="forgot-password" options={{ title: 'Forgot password', presentation: 'modal' }} />
             <Stack.Screen name="verify-email" options={{ title: 'Verify email' }} />
             <Stack.Screen name="change-password" options={{ title: 'Change password' }} />
+            <Stack.Screen name="messages" options={{ title: 'Messages' }} />
+            <Stack.Screen name="conversation/[id]" options={{ title: 'Conversation' }} />
             <Stack.Screen name="blocked" options={{ title: 'Blocked sellers' }} />
             <Stack.Screen name="register" options={{ title: 'Create account', presentation: 'modal' }} />
           </Stack>

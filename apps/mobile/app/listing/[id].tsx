@@ -93,7 +93,9 @@ export default function ListingDetail() {
         {l.safetyGuidance ? <View style={{ gap: 4 }}><Text style={type.h2}>Stay safe</Text>{l.safetyGuidance.map((x) => <Text key={x} style={type.body}>• {x}</Text>)}</View> : null}
 
         <View style={{ gap: space.sm }}>
-          {l.externalUrl ? <Button title="Open original listing" onPress={openOriginal} /> : <Text style={type.small}>Messaging sellers inside the app is not available yet.</Text>}
+          {l.externalUrl ? <Button title="Open original listing" onPress={openOriginal} /> : null}
+          {l.messageable && !l.isOwner ? <Button icon="chatbubble-ellipses-outline" title="Message seller" onPress={() => (user ? router.push({ pathname: '/conversation/[id]', params: { id: 'new', listingId: l.id, title: l.title } }) : router.push('/login'))} /> : null}
+          {!l.externalUrl && !l.messageable && !l.isOwner ? <Text style={type.small}>This listing is not open for messages right now.</Text> : null}
           <Button icon={saved ? 'heart' : 'heart-outline'} title={saved ? 'Saved (tap to remove)' : 'Save listing'} kind="secondary" busy={busy} onPress={() => guard(() => toggle(l.id))} />
           {l.price.minor !== null ? <Button title="Estimate resale profit" kind="secondary" onPress={() => router.push({ pathname: '/resale', params: { purchase: String(l.price.minor! / 100), currency: l.price.currency } })} /> : null}
           {l.isOwner ? <>
@@ -101,7 +103,7 @@ export default function ListingDetail() {
             <Button title="Mark as unavailable" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/unavailable`, { method: 'POST' }), 'Marked as unavailable.')} />
           </> : <>
             <Button title="Report this listing" kind="secondary" onPress={() => (user ? setReporting(true) : router.push('/login'))} />
-            {!l.externalUrl ? <Button title="Block this seller" kind="secondary" onPress={() => (user ? Alert.alert('Block this seller?', 'Their listings will disappear from your feeds and search. They are not told. You can undo this in Profile.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Block', style: 'destructive', onPress: () => void guard(async () => { await api(`/listings/${l.id}/block-seller`, { method: 'POST' }); router.back(); }) }]) : router.push('/login'))} /> : null}
+            {l.messageable ? <Button title="Block this seller" kind="secondary" onPress={() => (user ? Alert.alert('Block this seller?', 'Their listings will disappear from your feeds and search. They are not told. You can undo this in Profile.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Block', style: 'destructive', onPress: () => void guard(async () => { await api(`/listings/${l.id}/block-seller`, { method: 'POST' }); router.back(); }) }]) : router.push('/login'))} /> : null}
           </>}
         </View>
       </View>

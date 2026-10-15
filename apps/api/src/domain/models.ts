@@ -240,3 +240,38 @@ export interface SyncRunRec {
   rejected: number;
   errorMessage: string | null;
 }
+
+export interface ConversationRec {
+  id: string;
+  listingId: string;
+  buyerId: string;
+  sellerId: string;
+  createdAt: Date;
+  lastMessageAt: Date;
+  lastMessageSenderId: string | null;
+  lastMessagePreview: string;
+  buyerLastReadAt: Date | null;
+  sellerLastReadAt: Date | null;
+}
+
+export interface MessageRec {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  flagged: boolean;
+  createdAt: Date;
+}
+
+export type MessageReportReason = 'SPAM' | 'SCAM' | 'HARASSMENT' | 'CONTACT_DETAILS' | 'OTHER';
+export const MESSAGE_REPORT_REASONS: MessageReportReason[] = ['SPAM', 'SCAM', 'HARASSMENT', 'CONTACT_DETAILS', 'OTHER'];
+
+export interface MessageReportRec {
+  id: string;
+  messageId: string;
+  reporterId: string;
+  reason: MessageReportReason;
+  details: string | null;
+  status: ReportStatus;
+  createdAt: Date;
+}

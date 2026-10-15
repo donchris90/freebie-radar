@@ -484,6 +484,8 @@ export class ListingsService {
       images: l.imageUrls,
       externalUrl: l.externalUrl,
       contactMethod: l.contactMethod,
+      /** True when a person (not an outside source) posted it and it is open, so in-app messaging is possible. */
+      messageable: l.sellerUserId !== null && l.status === 'ACTIVE',
     };
   }
 

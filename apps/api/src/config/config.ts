@@ -64,6 +64,8 @@ export interface AppConfig {
   jobs: { enabled: boolean; redisUrl: string | null; queueName: string; /** Test hook: run every job at this interval instead of its own. */ intervalOverrideMs: number | null };
   /** Partner listing feeds (see docs/LISTING_SOURCES.md). Each one is read from PARTNER_FEED_<KEY>_* variables. */
   partnerFeeds: PartnerFeedConfig[];
+  /** Abuse limits for in-app messages. */
+  messaging: { newConversationsPerDay: number; messagesPerHour: number; maxUnanswered: number; maxBodyChars: number };
   /** Sync tuning. */
   sync: { everyMs: number; pageSize: number; maxPages: number; maxRunMs: number };
   /** When true, only accounts with a verified email can post listings. Defaults to on in production. */
@@ -151,6 +153,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicBaseUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/$/, '') : null,
     jobs: { enabled: jobsEnabled, redisUrl, queueName: env.JOBS_QUEUE_NAME ?? 'freebie-radar-jobs', intervalOverrideMs: env.JOBS_INTERVAL_MS ? int(env.JOBS_INTERVAL_MS, 0) || null : null },
     partnerFeeds,
+    messaging: { newConversationsPerDay: int(env.MSG_NEW_CONVERSATIONS_PER_DAY, 10), messagesPerHour: int(env.MSG_PER_HOUR, 30), maxUnanswered: int(env.MSG_MAX_UNANSWERED, 5), maxBodyChars: int(env.MSG_MAX_CHARS, 1000) },
     sync: { everyMs: int(env.SYNC_INTERVAL_MINUTES, 60) * 60_000, pageSize: int(env.SYNC_PAGE_SIZE, 100), maxPages: int(env.SYNC_MAX_PAGES, 50), maxRunMs: int(env.SYNC_MAX_RUN_SECONDS, 240) * 1000 },
     refreshTtlDays: int(env.REFRESH_TTL_DAYS, 30),
     refreshReuseGraceSeconds: int(env.REFRESH_REUSE_GRACE_SECONDS, 10),

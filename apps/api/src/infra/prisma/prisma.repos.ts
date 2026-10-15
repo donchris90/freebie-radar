@@ -9,9 +9,12 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  ConversationRec,
   CountryRec,
   DeliveryRec,
   ListingRec,
+  MessageRec,
+  MessageReportRec,
   ModerationRec,
   ReportRec,
   ResaleRec,
@@ -127,6 +130,14 @@ function toListing(r: Row): ListingRec {
     expiresAt: r.expiresAt ?? null,
   };
 }
+
+const toConversation = (r: Row): ConversationRec => ({
+  id: r.id, listingId: r.listingId, buyerId: r.buyerId, sellerId: r.sellerId, createdAt: r.createdAt,
+  lastMessageAt: r.lastMessageAt, lastMessageSenderId: r.lastMessageSenderId ?? null, lastMessagePreview: r.lastMessagePreview,
+  buyerLastReadAt: r.buyerLastReadAt ?? null, sellerLastReadAt: r.sellerLastReadAt ?? null,
+});
+const toMessage = (r: Row): MessageRec => ({ id: r.id, conversationId: r.conversationId, senderId: r.senderId, body: r.body, flagged: r.flagged, createdAt: r.createdAt });
+const toMessageReport = (r: Row): MessageReportRec => ({ id: r.id, messageId: r.messageId, reporterId: r.reporterId, reason: r.reason, details: r.details ?? null, status: r.status, createdAt: r.createdAt });
 
 const toSource = (r: Row): SourceRec => ({
   key: r.key,
@@ -816,6 +827,79 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
           where: { listingId, status: 'OPEN' },
           data: { status, resolvedAt: status === 'ACTIONED' || status === 'DISMISSED' ? new Date() : null },
         });
+      },
+    },
+
+    conversations: {
+      async insert(c) {
+        try {
+          return toConversation(await db.conversation.create({ data: { id: c.id, listingId: c.listingId, buyerId: c.buyerId, sellerId: c.sellerId, createdAt: c.createdAt, lastMessageAt: c.lastMessageAt, lastMessageSenderId: c.lastMessageSenderId, lastMessagePreview: c.lastMessagePreview, buyerLastReadAt: c.buyerLastReadAt, sellerLastReadAt: c.sellerLastReadAt } }));
+        } catch (e) {
+          if (isUniqueViolation(e)) return null;
+          throw e;
+        }
+      },
+      async findById(id) {
+        const r = await db.conversation.findUnique({ where: { id } });
+        return r ? toConversation(r) : null;
+      },
+      async findByListingBuyer(listingId, buyerId) {
+        const r = await db.conversation.findUnique({ where: { listingId_buyerId: { listingId, buyerId } } });
+        return r ? toConversation(r) : null;
+      },
+      async listForUser(userId, limit) {
+        const rows: Row[] = await db.conversation.findMany({ where: { OR: [{ buyerId: userId }, { sellerId: userId }] }, orderBy: { lastMessageAt: 'desc' }, take: limit });
+        return rows.map(toConversation);
+      },
+      async update(id, patch) {
+        await db.conversation.update({ where: { id }, data: patch });
+      },
+      async countStartedBy(buyerId, since) {
+        return db.conversation.count({ where: { buyerId, createdAt: { gte: since } } });
+      },
+      async addMessage(m) {
+        await db.message.create({ data: { id: m.id, conversationId: m.conversationId, senderId: m.senderId, body: m.body, flagged: m.flagged, createdAt: m.createdAt } });
+      },
+      async findMessage(id) {
+        const r = await db.message.findUnique({ where: { id } });
+        return r ? toMessage(r) : null;
+      },
+      async messages(conversationId, before, limit) {
+        const rows: Row[] = await db.message.findMany({
+          where: { conversationId, ...(before ? { createdAt: { lt: before } } : {}) },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: limit,
+        });
+        return rows.reverse().map(toMessage);
+      },
+      async countMessagesBy(senderId, since) {
+        return db.message.count({ where: { senderId, createdAt: { gte: since } } });
+      },
+      async countUnansweredBy(conversationId, senderId) {
+        const lastOther = await db.message.findFirst({ where: { conversationId, senderId: { not: senderId } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+        return db.message.count({ where: { conversationId, senderId, ...(lastOther ? { createdAt: { gt: lastOther.createdAt } } : {}) } });
+      },
+      async addReport(r) {
+        try {
+          return toMessageReport(await db.messageReport.create({ data: { id: r.id, messageId: r.messageId, reporterId: r.reporterId, reason: r.reason, details: r.details, status: r.status, createdAt: r.createdAt } }));
+        } catch (e) {
+          if (isUniqueViolation(e)) return null;
+          throw e;
+        }
+      },
+      async findReport(id) {
+        const r = await db.messageReport.findUnique({ where: { id } });
+        return r ? toMessageReport(r) : null;
+      },
+      async listReports(status, offset, limit) {
+        const [rows, total] = await Promise.all([
+          db.messageReport.findMany({ where: { status }, orderBy: { createdAt: 'asc' }, skip: offset, take: limit }),
+          db.messageReport.count({ where: { status } }),
+        ]);
+        return { items: (rows as Row[]).map(toMessageReport), total };
+      },
+      async setReportStatus(id, status) {
+        await db.messageReport.update({ where: { id }, data: { status, resolvedAt: status === 'OPEN' || status === 'IN_REVIEW' ? null : new Date() } });
       },
     },
 

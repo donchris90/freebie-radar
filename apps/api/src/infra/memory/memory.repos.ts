@@ -6,9 +6,12 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  ConversationRec,
   CountryRec,
   DeliveryRec,
   ListingRec,
+  MessageRec,
+  MessageReportRec,
   BlockRec,
   CodeRec,
   ModerationRec,
@@ -39,6 +42,9 @@ export function createMemoryRepos(): Repos {
   const deliveries = new Map<string, DeliveryRec>();
   const resale = new Map<string, ResaleRec>();
   const audit: AuditRec[] = [];
+  const conversations = new Map<string, ConversationRec>();
+  const messages: MessageRec[] = [];
+  const messageReports = new Map<string, MessageReportRec>();
   const sources = new Map<string, SourceRec>();
   const syncRuns: SyncRunRec[] = [];
   const moderation = new Map<string, ModerationRec>();
@@ -285,6 +291,47 @@ export function createMemoryRepos(): Repos {
       async setStatusForListing(listingId, status) {
         for (const r of reports.values()) if (r.listingId === listingId && r.status === 'OPEN') r.status = status;
       },
+    },
+
+    conversations: {
+      async insert(c) {
+        if ([...conversations.values()].some((x) => x.listingId === c.listingId && x.buyerId === c.buyerId)) return null;
+        conversations.set(c.id, clone(c));
+        return clone(c);
+      },
+      async findById(id) { const c = conversations.get(id); return c ? clone(c) : null; },
+      async findByListingBuyer(listingId, buyerId) {
+        const c = [...conversations.values()].find((x) => x.listingId === listingId && x.buyerId === buyerId);
+        return c ? clone(c) : null;
+      },
+      async listForUser(userId, limit) {
+        return [...conversations.values()].filter((c) => c.buyerId === userId || c.sellerId === userId).sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()).slice(0, limit).map(clone);
+      },
+      async update(id, patch) { const c = conversations.get(id); if (c) Object.assign(c, clone(patch)); },
+      async countStartedBy(buyerId, since) { return [...conversations.values()].filter((c) => c.buyerId === buyerId && c.createdAt >= since).length; },
+      async addMessage(m) { messages.push(clone(m)); },
+      async findMessage(id) { const m = messages.find((x) => x.id === id); return m ? clone(m) : null; },
+      async messages(conversationId, before, limit) {
+        const rows = messages.filter((m) => m.conversationId === conversationId && (!before || m.createdAt < before)).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+        return rows.slice(Math.max(0, rows.length - limit)).map(clone);
+      },
+      async countMessagesBy(senderId, since) { return messages.filter((m) => m.senderId === senderId && m.createdAt >= since).length; },
+      async countUnansweredBy(conversationId, senderId) {
+        const inConv = messages.filter((m) => m.conversationId === conversationId);
+        const lastOther = inConv.filter((m) => m.senderId !== senderId).reduce<Date | null>((a, m) => (!a || m.createdAt > a ? m.createdAt : a), null);
+        return inConv.filter((m) => m.senderId === senderId && (!lastOther || m.createdAt > lastOther)).length;
+      },
+      async addReport(r) {
+        if ([...messageReports.values()].some((x) => x.messageId === r.messageId && x.reporterId === r.reporterId)) return null;
+        messageReports.set(r.id, clone(r));
+        return clone(r);
+      },
+      async findReport(id) { const r = messageReports.get(id); return r ? clone(r) : null; },
+      async listReports(status, offset, limit) {
+        const rows = [...messageReports.values()].filter((r) => r.status === status).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+        return { items: rows.slice(offset, offset + limit).map(clone), total: rows.length };
+      },
+      async setReportStatus(id, status) { const r = messageReports.get(id); if (r) r.status = status; },
     },
 
     alerts: {

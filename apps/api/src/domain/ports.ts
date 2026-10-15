@@ -7,10 +7,13 @@ import type {
   CodePurpose,
   CodeRec,
   Condition,
+  ConversationRec,
   CountryRec,
   DeliveryRec,
   DeliveryStatus,
   ListingRec,
+  MessageRec,
+  MessageReportRec,
   ModerationRec,
   RefreshRec,
   ReportRec,
@@ -131,6 +134,27 @@ export interface ReportRepo {
   setStatusForListing(listingId: string, status: ReportStatus): Promise<void>;
 }
 
+export interface ConversationRepo {
+  /** Returns null when this buyer already has a conversation about the listing. */
+  insert(c: ConversationRec): Promise<ConversationRec | null>;
+  findById(id: string): Promise<ConversationRec | null>;
+  findByListingBuyer(listingId: string, buyerId: string): Promise<ConversationRec | null>;
+  listForUser(userId: string, limit: number): Promise<ConversationRec[]>;
+  update(id: string, patch: Partial<Pick<ConversationRec, 'lastMessageAt' | 'lastMessageSenderId' | 'lastMessagePreview' | 'buyerLastReadAt' | 'sellerLastReadAt'>>): Promise<void>;
+  countStartedBy(buyerId: string, since: Date): Promise<number>;
+  addMessage(m: MessageRec): Promise<void>;
+  findMessage(id: string): Promise<MessageRec | null>;
+  /** Oldest first. `before` pages backwards through older messages. */
+  messages(conversationId: string, before: Date | null, limit: number): Promise<MessageRec[]>;
+  countMessagesBy(senderId: string, since: Date): Promise<number>;
+  /** Messages `senderId` sent since the other person last wrote in this conversation. */
+  countUnansweredBy(conversationId: string, senderId: string): Promise<number>;
+  addReport(r: MessageReportRec): Promise<MessageReportRec | null>;
+  findReport(id: string): Promise<MessageReportRec | null>;
+  listReports(status: MessageReportRec['status'], offset: number, limit: number): Promise<{ items: MessageReportRec[]; total: number }>;
+  setReportStatus(id: string, status: MessageReportRec['status']): Promise<void>;
+}
+
 export interface AlertRepo {
   create(a: AlertRec): Promise<AlertRec>;
   listByUser(userId: string): Promise<AlertRec[]>;
@@ -198,6 +222,7 @@ export interface Repos {
   syncRuns: SyncRunRepo;
   saved: SavedRepo;
   reports: ReportRepo;
+  conversations: ConversationRepo;
   alerts: AlertRepo;
   resale: ResaleRepo;
   audit: AuditRepo;

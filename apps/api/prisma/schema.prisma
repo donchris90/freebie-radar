@@ -182,6 +182,10 @@ model User {
   reports          ListingReport[]       @relation("reporter")
   blocksMade       UserBlock[]           @relation("blocker")
   blocksReceived   UserBlock[]           @relation("blocked")
+  buyerConversations  Conversation[]     @relation("convBuyer")
+  sellerConversations Conversation[]     @relation("convSeller")
+  messagesSent     Message[]             @relation("messageSender")
+  messageReports   MessageReport[]       @relation("messageReporter")
   calculations     ResaleCalculation[]
   dismissals       ListingDismissal[]
   interactions     CategoryInteraction[]
@@ -327,6 +331,7 @@ model Listing {
   dealScores       DealScore[]
   savedBy          SavedListing[]
   reports          ListingReport[]
+  conversations    Conversation[]
   moderationActions ModerationAction[]
   promotions       Promotion[]
   alertDeliveries  AlertDelivery[]
@@ -677,4 +682,58 @@ model Country {
   updatedAt       DateTime @updatedAt
 
   @@index([enabled])
+}
+
+// ---- In-app messaging: people talk inside the app; neither side ever sees the other's email or phone ----
+model Conversation {
+  id                String    @id @default(uuid())
+  listingId         String
+  buyerId           String
+  sellerId          String
+  createdAt         DateTime  @default(now())
+  lastMessageAt     DateTime  @default(now())
+  lastMessageSenderId String?
+  lastMessagePreview String   @default("")
+  buyerLastReadAt   DateTime?
+  sellerLastReadAt  DateTime?
+  listing           Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer             User      @relation("convBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller            User      @relation("convSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  messages          Message[]
+
+  @@unique([listingId, buyerId])
+  @@index([buyerId, lastMessageAt])
+  @@index([sellerId, lastMessageAt])
+}
+
+model Message {
+  id              String        @id @default(uuid())
+  conversationId  String
+  senderId        String
+  body            String
+  /// Mentions paying in advance or similar; the recipient sees a caution next to it.
+  flagged         Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User          @relation("messageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  reports         MessageReport[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model MessageReport {
+  id          String       @id @default(uuid())
+  messageId   String
+  reporterId  String
+  reason      String       // SPAM | SCAM | HARASSMENT | CONTACT_DETAILS | OTHER
+  details     String?
+  status      ReportStatus @default(OPEN)
+  createdAt   DateTime     @default(now())
+  resolvedAt  DateTime?
+  message     Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reporter    User         @relation("messageReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reporterId])
+  @@index([status, createdAt])
 }
