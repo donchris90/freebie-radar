@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import sharp from 'sharp';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PRISMA, PUSH_SENDER, REPOS, Repos, PushMessage } from '../src/domain/ports';
@@ -670,6 +671,80 @@ describe('Freebie Radar API', () => {
       await http().patch('/admin/countries/ZZ').set(bearer(admin.token)).send({ enabled: true }).expect(404);
       await http().patch('/admin/countries/USA').set(bearer(admin.token)).send({ enabled: true }).expect(400);
       await http().patch('/admin/countries/DE').set(bearer(admin.token)).send({ enabled: 'yes' }).expect(400);
+    });
+  });
+
+  describe('photo upload', () => {
+    const jpegWithGps = () =>
+      sharp({ create: { width: 3000, height: 2000, channels: 3, background: '#336699' } })
+        .withExif({ IFD0: { Copyright: 'secret-owner' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '40/1 42/1 46/1' } })
+        .jpeg()
+        .toBuffer();
+    const upload = (token: string | null, buf: Buffer, name = 'photo.jpg', type = 'image/jpeg') => {
+      const r = http().post('/uploads/images');
+      if (token) r.set(bearer(token));
+      return r.attach('file', buf, { filename: name, contentType: type });
+    };
+    const pathOf = (url: string) => new URL(url).pathname;
+
+    it('requires a signed-in user and a real image', async () => {
+      const u = await signup(app);
+      expect((await upload(null, await jpegWithGps())).status).toBe(401);
+      expect((await http().post('/uploads/images').set(bearer(u.token))).status).toBe(400);
+      expect((await upload(u.token, Buffer.from('<script>alert(1)</script>'), 'a.png', 'image/png')).status).toBe(400);
+      const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"><rect width="5" height="5"/></svg>');
+      expect((await upload(u.token, svg, 'a.svg', 'image/svg+xml')).status).toBe(400);
+      expect((await upload(u.token, Buffer.alloc(9 * 1024 * 1024, 1))).status).toBe(413);
+    });
+
+    it('re-encodes the photo: strips EXIF/GPS, caps the size, and serves it publicly', async () => {
+      const u = await signup(app);
+      const input = await jpegWithGps();
+      expect((await sharp(input).metadata()).exif).toBeDefined();
+      const res = await upload(u.token, input).expect(201);
+      expect(res.body.width).toBe(1600);
+      expect(res.body.height).toBe(1067);
+      expect(pathOf(res.body.url)).toMatch(new RegExp(`^/uploads/u/${u.id}/[0-9a-f-]{36}\\.jpg$`));
+
+      const served = await http().get(pathOf(res.body.url)).expect(200);
+      expect(served.headers['content-type']).toBe('image/jpeg');
+      expect(served.headers['cross-origin-resource-policy']).toBe('cross-origin');
+      expect(served.headers['x-content-type-options']).toBe('nosniff');
+      const out = await sharp(served.body as Buffer).metadata();
+      expect(out.exif).toBeUndefined();
+      expect(out.width).toBe(1600);
+    });
+
+    it('does not serve path tricks or unknown files', async () => {
+      const u = await signup(app);
+      await http().get(`/uploads/u/${u.id}/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}.jpg`).expect(404);
+      expect([400, 404]).toContain((await http().get('/uploads/u/..%2F..%2Fetc/passwd.jpg')).status);
+      expect([400, 404]).toContain((await http().get(`/uploads/u/${u.id}/..%2F..%2Fsecret.jpg`)).status);
+    });
+
+    it('lets a seller attach their own photo to a listing, and only their own', async () => {
+      const a = await signup(app);
+      const b = await signup(app);
+      const photoA = (await upload(a.token, await jpegWithGps()).expect(201)).body.url as string;
+      const l = await makeListing(app, a.token, { title: `Photo item ${uniq()}`, imageUrls: [photoA] });
+      expect(l.images).toEqual([photoA]);
+      const pub = await http().get(`/listings/${l.id}`).expect(200);
+      expect(pub.body.images).toEqual([photoA]);
+
+      const stolen = await http().post('/listings').set(bearer(b.token)).send(payload({ imageUrls: [photoA] }));
+      expect(stolen.status).toBe(400);
+      const insecure = await http().post('/listings').set(bearer(b.token)).send(payload({ imageUrls: ['http://img.example.com/a.jpg'] }));
+      expect(insecure.status).toBe(400);
+      const external = await http().post('/listings').set(bearer(b.token)).send(payload({ imageUrls: ['https://img.example.com/a.jpg'] }));
+      expect(external.status).toBe(201);
+    });
+
+    it('deletes a user\'s photos when the account is deleted', async () => {
+      const u = await signup(app);
+      const url = (await upload(u.token, await jpegWithGps()).expect(201)).body.url as string;
+      await http().get(pathOf(url)).expect(200);
+      await http().delete('/me').set(bearer(u.token)).expect(200);
+      await http().get(pathOf(url)).expect(404);
     });
   });
 });

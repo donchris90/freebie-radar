@@ -43,6 +43,32 @@ export async function api<T>(path: string, opts: { method?: string; body?: unkno
   return json as T;
 }
 
+/** Uploads one photo from a local file URI (camera or library) and returns its public URL. */
+export async function uploadPhoto(uri: string, mimeType?: string | null): Promise<string> {
+  const token = getToken();
+  const form = new FormData();
+  // React Native's FormData accepts a { uri, name, type } descriptor for files.
+  form.append('file', { uri, name: 'photo.jpg', type: mimeType ?? 'image/jpeg' } as unknown as Blob);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60_000);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/uploads/images`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {}, body: form, signal: ctrl.signal });
+  } catch {
+    throw new ApiError(0, "Can't upload right now. Check your connection and try again.", true);
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await res.text();
+  let json: { url?: string; message?: string | string[] } | null = null;
+  try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON error body */ }
+  if (!res.ok || !json?.url) {
+    const m = json?.message;
+    throw new ApiError(res.status, Array.isArray(m) ? m.join('. ') : m ?? `Upload failed (${res.status})`);
+  }
+  return json.url;
+}
+
 export interface ListingView {
   id: string;
   title: string;

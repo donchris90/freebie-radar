@@ -1,3 +1,4 @@
+import { uploadOwner } from '../storage/keys';
 import { CountriesService } from '../countries/countries.service';
 import {
   ArrayMaxSize,
@@ -122,6 +123,11 @@ export class ListingsService {
     const now = new Date();
     if (!this.cfg.categories.includes(dto.categoryKey)) throw new BadRequestException('Unknown category');
     if (!isValidCoordinate(dto.lat, dto.lng)) throw new BadRequestException('Invalid coordinates');
+    for (const raw of dto.imageUrls ?? []) {
+      const owner = uploadOwner(raw);
+      if (owner !== null && owner !== user.id) throw new BadRequestException('You can only attach photos you uploaded yourself');
+      if (!raw.startsWith('https://') && (owner === null || this.cfg.nodeEnv === 'production')) throw new BadRequestException('Photo links must use https');
+    }
     const country = (dto.countryCode ?? user.countryCode).toUpperCase();
     if (!(await this.countries.getEnabled(country))) throw new BadRequestException(`Country ${country} is not enabled`);
 

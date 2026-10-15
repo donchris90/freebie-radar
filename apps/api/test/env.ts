@@ -9,3 +9,6 @@ if (process.env.TEST_DATABASE_URL) {
 } else {
   process.env.STORE = 'memory';
 }
+
+// Uploaded photos go to a throwaway folder.
+process.env.UPLOAD_DIR = require('path').join(require('os').tmpdir(), `freebie-radar-test-uploads-${process.pid}`);

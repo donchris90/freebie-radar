@@ -1,3 +1,4 @@
+import { resolve } from 'path';
 import { DEFAULT_LAUNCH_COUNTRIES } from '../core/countries';
 
 /** Runtime configuration. Market, currency, countries and limits come from the environment, not code. */
@@ -32,6 +33,12 @@ export interface AppConfig {
   reportThreshold: number;
   /** Persistence adapter. Production always uses the database; the in-memory store refuses to start there. */
   store: 'memory' | 'prisma';
+  /** Where uploaded photos live. `local` (disk) for development; `s3` for production. */
+  storageDriver: 'local' | 's3';
+  uploadDir: string;
+  /** Public origin used in photo URLs for the local driver. Falls back to the request's own origin. */
+  publicBaseUrl: string | null;
+  s3: null | { bucket: string; region: string; accessKeyId: string; secretAccessKey: string; publicBaseUrl: string; endpoint: string | null };
 }
 
 const int = (v: string | undefined, d: number) => (v && /^\d+$/.test(v) ? Number(v) : d);
@@ -45,6 +52,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const storeRaw = (env.STORE ?? (nodeEnv === 'production' ? 'prisma' : 'memory')).toLowerCase();
   if (storeRaw !== 'memory' && storeRaw !== 'prisma') throw new Error('STORE must be "memory" or "prisma"');
   if (storeRaw === 'prisma' && !env.DATABASE_URL) throw new Error('DATABASE_URL is required when STORE=prisma');
+  const driver = (env.STORAGE_DRIVER ?? 'local').toLowerCase();
+  if (driver !== 'local' && driver !== 's3') throw new Error('STORAGE_DRIVER must be "local" or "s3"');
+  let s3: AppConfig['s3'] = null;
+  if (driver === 's3') {
+    const need = ['S3_BUCKET', 'S3_REGION', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_PUBLIC_BASE_URL'];
+    const missing = need.filter((k) => !env[k]);
+    if (missing.length) throw new Error(`STORAGE_DRIVER=s3 requires ${missing.join(', ')}`);
+    s3 = { bucket: env.S3_BUCKET!, region: env.S3_REGION!, accessKeyId: env.S3_ACCESS_KEY_ID!, secretAccessKey: env.S3_SECRET_ACCESS_KEY!, publicBaseUrl: env.S3_PUBLIC_BASE_URL!, endpoint: env.S3_ENDPOINT || null };
+  }
+  if (nodeEnv === 'production' && driver === 'local' && !env.PUBLIC_BASE_URL) {
+    throw new Error('PUBLIC_BASE_URL is required in production when STORAGE_DRIVER=local (and local disk must be persistent)');
+  }
   const list = (v: string | undefined, d: string[]) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
   return {
     nodeEnv,
@@ -59,6 +78,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     alertLimits: { FREE: int(env.ALERT_LIMIT_FREE, 3), PREMIUM: int(env.ALERT_LIMIT_PREMIUM, 25), BUSINESS: int(env.ALERT_LIMIT_BUSINESS, 50) },
     reportThreshold: int(env.REPORT_THRESHOLD, 2),
     store: storeRaw,
+    storageDriver: driver,
+    uploadDir: env.UPLOAD_DIR ?? resolve(process.cwd(), 'uploads'),
+    publicBaseUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/$/, '') : null,
+    s3,
   };
 }
 

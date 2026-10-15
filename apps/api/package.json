@@ -15,6 +15,7 @@
     "test:pg": "node scripts/test-pg.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1152.0",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.1.0",
     "@nestjs/config": "^4.0.0",
@@ -31,7 +32,8 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.4.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

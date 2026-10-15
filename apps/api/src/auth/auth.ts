@@ -18,6 +18,7 @@ import {
   createParamDecorator,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { STORAGE, StorageDriver } from '../storage/storage';
 import { CountriesService } from '../countries/countries.service';
 import { JwtService } from '@nestjs/jwt';
 import { Throttle } from '@nestjs/throttler';
@@ -161,6 +162,7 @@ export class AuthService {
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     private readonly jwt: JwtService,
     private readonly countries: CountriesService,
+    @Inject(STORAGE) private readonly storage: StorageDriver,
   ) {}
 
   private async token(u: UserRec) {
@@ -240,6 +242,8 @@ export class AuthService {
     });
     const own = await this.repos.listings.search({ sellerUserId: user.id, publicOnly: false, sort: 'newest', offset: 0, limit: 1000 });
     for (const l of own.items) await this.repos.listings.update(l.id, { status: 'REMOVED' });
+    // Photos are personal data too: delete them with the account.
+    await this.storage.deletePrefix(`u/${user.id}/`).catch(() => 0);
     await this.repos.audit.add({ id: randomUUID(), actorId: user.id, action: 'ACCOUNT_DELETED', entityType: 'User', entityId: user.id, metadata: {}, createdAt: new Date() });
   }
 }

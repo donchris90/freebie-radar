@@ -15,7 +15,7 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 | Background jobs | Job bodies exist (`runExpiry`, `dispatchPending`) and are triggered by admin endpoints. **BullMQ scheduling is not wired** |
 | Expo mobile app (`apps/mobile`): Discover, Map/List, Alerts, Saved, Profile, listing detail, sell flow, resale calculator, auth | Written. Type-checks and the Android JS bundle builds. **Never run on a device or simulator** |
 | Admin dashboard (`apps/admin`): overview stats, moderation queue, appeals, audit log, job triggers, role-gated | Written. Type-checks and `vite build` succeeds. Not exercised against a running API in a browser |
-| Image upload to object storage | Not started. The sell screen has no photo picker, and the API accepts validated `https` image URLs only |
+| Photo upload (`POST /uploads/images`, sell-screen camera and library picker) | Built and covered by e2e tests with the local-disk driver. Photos are decoded and re-encoded (EXIF/GPS removed, max 1600px JPEG). The S3 driver is written but **never run against a real bucket** |
 | In-app messaging between buyer and seller | Not started. The listing screen says so and offers "Open original listing" only for external-link listings |
 | Countries (`Country` table, admin Countries page, public `GET /countries`) | US, CA and GB open at first; every other catalog country is switched on from the admin dashboard. Covered by e2e tests on the in-memory store; needs migration `countries` on PostgreSQL |
 | Payments, promotions, subscriptions | Not implemented. Tier gating exists for alert limits only |
@@ -33,7 +33,7 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 npm install                      # from the repo root
 cp apps/api/.env.example apps/api/.env
 cd apps/api
-npx jest                         # 150 tests, 10 suites
+npx jest                         # 155 tests, 10 suites
 npx tsc --noEmit                 # type-check
 npm run build && npm start       # production build (STORE=prisma, needs PostgreSQL)
 npm run start:dev                # local dev; reads apps/api/.env (STORE=prisma for PostgreSQL, STORE=memory for a quick trial)
@@ -59,7 +59,7 @@ npm run build                            # type-check + production build
 
 To try the admin dashboard locally, register a user, then use `npm run seed` with `ADMIN_EMAIL` and `ADMIN_PASSWORD` to create an admin on PostgreSQL (the in-memory store has no seed).
 
-Observed in the build sandbox: 150 tests passing, type-check clean, `nest build` succeeds, and production startup is refused for a weak `JWT_SECRET` and for the in-memory store.
+Observed in the build sandbox: 155 tests passing, type-check clean, `nest build` succeeds, and production startup is refused for a weak `JWT_SECRET` and for the in-memory store.
 
 ## API (no URL prefix)
 
@@ -80,6 +80,8 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 | `GET /feed/recommended` | user | Personalised feed with an explanation string |
 | `GET /saved`, `POST /saved/:id`, `DELETE /saved/:id` | user | Saved listings |
 | `POST /alerts`, `GET /alerts`, `PATCH /alerts/:id`, `DELETE /alerts/:id`, `GET /alerts/history` | user | Radar Alerts (plan limits from config) |
+| `POST /uploads/images` | user | Upload one photo (multipart field `file`, up to 8 MB; JPEG, PNG or WebP). Returns the `url` to pass in `imageUrls` |
+| `GET /uploads/u/:userId/:file` | none | Serves photos stored on local disk (not used with S3) |
 | `POST /resale/calculate` | none | Stateless profit calculator |
 | `POST /resale`, `GET /resale`, `GET /resale/compare`, `DELETE /resale/:id` | user | Saved calculations, ranked per currency |
 | `POST /appeals` | user | Appeal a moderation decision on your listing |
@@ -101,6 +103,7 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 
 ## Known limitations
 
+- Photos: no thumbnails yet (feeds load the 1600px image), no cleanup job for uploads never attached to a listing, no per-user storage quota beyond the rate limit (30 uploads per minute). Photos are deleted when an account is deleted. In production use `STORAGE_DRIVER=s3` (S3-compatible: AWS, R2, MinIO) with `S3_PUBLIC_BASE_URL`; local disk needs `PUBLIC_BASE_URL` and persistent storage.
 - Pagination is offset-based in both adapters; move to keyset pagination on `(postedAt, id)` for large feeds. Radius and distance-ordered searches prefilter by bounding box in SQL (capped at 5,000 candidates) and refine in memory; PostGIS is the upgrade path.
 - Deal scores are computed on read from comparable listings; production should cache scores and maintain `ComparablePriceObservation` rows.
 - No refresh-token flow yet (access tokens only), no email verification or password reset, no user-to-user blocking endpoints.
