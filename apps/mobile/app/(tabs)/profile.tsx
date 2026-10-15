@@ -78,6 +78,7 @@ export default function Profile() {
         <Panel style={{ gap: space.sm }}>
           <Text style={type.h2}>Account safety</Text>
           <Button title="Change password" kind="secondary" onPress={() => router.push('/change-password')} />
+          <Button icon="sparkles-outline" title={user.tier === 'FREE' ? 'Premium' : 'Your Premium plan'} kind="secondary" onPress={() => router.push('/premium')} />
           <Button icon="chatbubbles-outline" title="Messages" kind="secondary" onPress={() => router.push('/messages')} />
           <Button title="Blocked sellers" kind="secondary" onPress={() => router.push('/blocked')} />
           <Button title="Sign out of all devices" kind="secondary" onPress={() => Alert.alert('Sign out of all devices?', 'Every phone and browser signed in to your account, including this one, will be signed out.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out everywhere', style: 'destructive', onPress: async () => { try { await logoutEverywhere(); } catch (e) { Alert.alert('Could not sign out', (e as ApiError).message); } } }])} />

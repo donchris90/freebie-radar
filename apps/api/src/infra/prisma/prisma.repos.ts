@@ -9,6 +9,7 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  BillingEventRec,
   ConversationRec,
   CountryRec,
   DeliveryRec,
@@ -16,10 +17,12 @@ import type {
   MessageRec,
   MessageReportRec,
   ModerationRec,
+  PaymentRec,
   ReportRec,
   ResaleRec,
   UserPrefs,
   SourceRec,
+  SubscriptionRec,
   SyncRunRec,
   UserRec,
 } from '../../domain/models';
@@ -138,6 +141,18 @@ const toConversation = (r: Row): ConversationRec => ({
 });
 const toMessage = (r: Row): MessageRec => ({ id: r.id, conversationId: r.conversationId, senderId: r.senderId, body: r.body, flagged: r.flagged, createdAt: r.createdAt });
 const toMessageReport = (r: Row): MessageReportRec => ({ id: r.id, messageId: r.messageId, reporterId: r.reporterId, reason: r.reason, details: r.details ?? null, status: r.status, createdAt: r.createdAt });
+
+const toSubscription = (r: Row): SubscriptionRec => ({
+  userId: r.userId, tier: r.tier, status: r.status, planKey: r.planKey ?? null, provider: r.provider ?? null, providerRef: r.providerRef ?? null,
+  currentPeriodEnd: r.currentPeriodEnd ?? null, cancelAtPeriodEnd: r.cancelAtPeriodEnd,
+});
+const toPayment = (r: Row): PaymentRec => ({
+  id: r.id, userId: r.userId, provider: r.provider, reference: r.reference, providerPaymentRef: r.providerPaymentRef ?? null, planKey: r.planKey ?? null,
+  amountMinor: r.amountMinor, currency: r.currency, status: r.status, failureReason: r.failureReason ?? null, refundedMinor: r.refundedMinor, createdAt: r.createdAt, paidAt: r.paidAt ?? null,
+});
+const toBillingEvent = (r: Row): BillingEventRec => ({
+  id: r.id, provider: r.provider, eventKey: r.eventKey, type: r.type, status: r.status, error: r.error ?? null, attempts: r.attempts, receivedAt: r.receivedAt, processedAt: r.processedAt ?? null,
+});
 
 const toSource = (r: Row): SourceRec => ({
   key: r.key,
@@ -900,6 +915,77 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
       },
       async setReportStatus(id, status) {
         await db.messageReport.update({ where: { id }, data: { status, resolvedAt: status === 'OPEN' || status === 'IN_REVIEW' ? null : new Date() } });
+      },
+    },
+
+    billing: {
+      async getSubscription(userId) {
+        const r = await db.subscription.findUnique({ where: { userId } });
+        return r ? toSubscription(r) : null;
+      },
+      async findSubscriptionByRef(provider, providerRef) {
+        const r = await db.subscription.findFirst({ where: { provider, providerRef } });
+        return r ? toSubscription(r) : null;
+      },
+      async saveSubscription(s) {
+        const data = { tier: s.tier, status: s.status, planKey: s.planKey, provider: s.provider, providerRef: s.providerRef, currentPeriodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd };
+        await db.subscription.upsert({ where: { userId: s.userId }, create: { userId: s.userId, ...data }, update: data });
+      },
+      async listSubscriptions(statuses) {
+        const rows: Row[] = await db.subscription.findMany({ where: { status: { in: statuses } } });
+        return rows.map(toSubscription);
+      },
+      async insertPayment(p) {
+        try {
+          return toPayment(await db.payment.create({ data: { id: p.id, userId: p.userId, provider: p.provider, reference: p.reference, providerPaymentRef: p.providerPaymentRef, planKey: p.planKey, amountMinor: p.amountMinor, currency: p.currency, status: p.status, failureReason: p.failureReason, refundedMinor: p.refundedMinor, createdAt: p.createdAt, paidAt: p.paidAt } }));
+        } catch (e) {
+          if (isUniqueViolation(e)) return null;
+          throw e;
+        }
+      },
+      async findPayment(reference) {
+        const r = await db.payment.findUnique({ where: { reference } });
+        return r ? toPayment(r) : null;
+      },
+      async findPaymentByProviderRef(providerPaymentRef) {
+        const r = await db.payment.findUnique({ where: { providerPaymentRef } });
+        return r ? toPayment(r) : null;
+      },
+      async transitionPayment(id, from, patch) {
+        const { id: _ignored, ...data } = patch as Record<string, unknown>;
+        const res = await db.payment.updateMany({ where: { id, status: { in: from } }, data });
+        return res.count === 1;
+      },
+      async listPayments(f) {
+        const where = f.userId ? { userId: f.userId } : {};
+        const [rows, total] = await Promise.all([
+          db.payment.findMany({ where, orderBy: { createdAt: 'desc' }, skip: f.offset, take: f.limit }),
+          db.payment.count({ where }),
+        ]);
+        return { items: (rows as Row[]).map(toPayment), total };
+      },
+      async stalePending(before) {
+        const rows: Row[] = await db.payment.findMany({ where: { status: 'PENDING', createdAt: { lt: before } } });
+        return rows.map(toPayment);
+      },
+      async beginEvent(provider, eventKey, type) {
+        try {
+          return { event: toBillingEvent(await db.billingEvent.create({ data: { provider, eventKey, type, status: 'RECEIVED' } })), created: true };
+        } catch (e) {
+          if (!isUniqueViolation(e)) throw e;
+          const row = await db.billingEvent.findUnique({ where: { provider_eventKey: { provider, eventKey } } });
+          return { event: toBillingEvent(row), created: false };
+        }
+      },
+      async retryEvent(id) {
+        await db.billingEvent.update({ where: { id }, data: { attempts: { increment: 1 }, status: 'RECEIVED', error: null } });
+      },
+      async finishEvent(id, status, error) {
+        await db.billingEvent.update({ where: { id }, data: { status, error, processedAt: new Date() } });
+      },
+      async listEvents(f) {
+        const rows: Row[] = await db.billingEvent.findMany({ where: f.status ? { status: f.status } : {}, orderBy: { receivedAt: 'desc' }, take: f.limit });
+        return rows.map(toBillingEvent);
       },
     },
 

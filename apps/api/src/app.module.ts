@@ -16,6 +16,9 @@ import { CountriesService } from './countries/countries.service';
 import { createStorage, STORAGE } from './storage/storage';
 import { createMailer, MAILER } from './mail/mailer';
 import { MessageModerationController, MessagingController, MessagingService } from './messaging/messaging';
+import { BillingAdminController, BillingController, BillingService } from './billing/billing';
+import { FlutterwaveProvider } from './billing/flutterwave';
+import { BILLING_PROVIDERS } from './billing/provider';
 import { JobsService } from './jobs/jobs.service';
 import { JsonFeedProvider } from './providers/json-feed';
 import { RegisteredSource, SOURCES, SyncService } from './sync/sync.service';
@@ -45,7 +48,7 @@ class HealthController {
     JwtModule.register({ global: true, secret: config.jwtSecret, signOptions: { expiresIn: config.jwtExpiresIn as never } }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: config.throttleLimit }]),
   ],
-  controllers: [HealthController, AuthController, ListingsController, EngagementController, AlertsController, AdminController, AppealController, CountriesController, AdminCountriesController, UploadsController, MessagingController, MessageModerationController],
+  controllers: [HealthController, AuthController, ListingsController, EngagementController, AlertsController, AdminController, AppealController, CountriesController, AdminCountriesController, UploadsController, MessagingController, MessageModerationController, BillingController, BillingAdminController],
   providers: [
     { provide: APP_CONFIG, useValue: config },
     { provide: PRISMA, useFactory: (): PrismaClient | null => (config.store === 'prisma' ? new PrismaClient() : null) },
@@ -75,6 +78,11 @@ class HealthController {
     },
     JobsService,
     SyncService,
+    {
+      provide: BILLING_PROVIDERS,
+      useFactory: () => [new FlutterwaveProvider({ secretKey: config.billing.flutterwave.secretKey, secretHash: config.billing.flutterwave.secretHash, baseUrl: config.billing.flutterwave.baseUrl })],
+    },
+    BillingService,
     MessagingService,
     AuthService,
     ListingsService,

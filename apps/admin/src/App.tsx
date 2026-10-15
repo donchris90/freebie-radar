@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setRefreshToken, setToken, signOut, Stats } from './api';
 
-type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'messages' | 'sources' | 'jobs';
+type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'billing' | 'messages' | 'sources' | 'jobs';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -288,6 +288,50 @@ function Jobs() {
   );
 }
 
+interface PayRow { id: string; userId: string; reference: string; status: string; amountMinor: number; currency: string; refundedMinor: number; createdAt: string; failureReason: string | null }
+interface EventRow { id: string; type: string; eventKey: string; status: string; error: string | null; attempts: number; receivedAt: string }
+
+function Billing() {
+  const pays = useLoad(() => api<{ items: PayRow[]; total: number }>('/admin/billing/payments?limit=25'), []);
+  const evs = useLoad(() => api<{ items: EventRow[] }>('/admin/billing/events?limit=25'), []);
+  const [reason, setReason] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+  const money = (minor: number, cur: string) => `${(minor / 100).toFixed(2)} ${cur}`;
+  const act = async (path: string, body: unknown) => { setMsg(null); try { await api(path, { body }); pays.reload(); evs.reload(); } catch (e) { setMsg((e as Error).message); } };
+  const failed = evs.data?.items.filter((e) => e.status === 'FAILED') ?? [];
+  return (
+    <>
+      <section className="card">
+        <h2>Payments</h2>
+        <p className="muted">Refunds go to the payment provider first; the amount here is in the payment currency. A full refund ends Premium at once.</p>
+        <Status {...pays} retry={pays.reload} />
+        {msg ? <p className="err" role="alert">{msg}</p> : null}
+        {pays.data ? <table><thead><tr><th>When</th><th>Reference</th><th>Amount</th><th>Status</th><th>Refund</th></tr></thead><tbody>
+          {pays.data.items.map((p) => (
+            <tr key={p.id}>
+              <td>{new Date(p.createdAt).toLocaleString()}</td><td><code>{p.reference}</code></td>
+              <td>{money(p.amountMinor, p.currency)}{p.refundedMinor ? <div className="muted">refunded {money(p.refundedMinor, p.currency)}</div> : null}</td>
+              <td><span className={`pill ${p.status === 'SUCCEEDED' ? 'on' : p.status === 'FAILED' || p.status === 'REFUND_PENDING' ? 'warn' : ''}`}>{p.status.toLowerCase().replace(/_/g, ' ')}</span>{p.failureReason ? <div className="muted">{p.failureReason}</div> : null}</td>
+              <td>
+                {p.status === 'SUCCEEDED' || p.status === 'PARTIALLY_REFUNDED' ? <div className="row"><input aria-label="Reason" placeholder="Reason (audited)" style={{ maxWidth: 200 }} value={reason[p.reference] ?? ''} onChange={(e) => setReason({ ...reason, [p.reference]: e.target.value })} /><button className="danger" onClick={() => { if (window.confirm('Refund the remaining amount in full?')) void act('/admin/billing/refund', { reference: p.reference, reason: reason[p.reference] ?? '' }); }}>Refund all</button></div> : null}
+                {p.status === 'REFUND_PENDING' ? <button onClick={() => act(`/admin/billing/refunds/${p.reference}/settle`, { note: 'Confirmed complete on the provider dashboard' })}>Mark completed</button> : null}
+              </td>
+            </tr>
+          ))}
+        </tbody></table> : null}
+      </section>
+      <section className="card">
+        <h2>Webhook events</h2>
+        {failed.length ? <p className="err" role="alert">{failed.length} event(s) failed to process. The provider will retry; if they keep failing, investigate.</p> : <p className="muted">No failed events in the latest 25.</p>}
+        <Status {...evs} retry={evs.reload} />
+        {evs.data ? <table><thead><tr><th>Received</th><th>Event</th><th>Status</th><th>Tries</th></tr></thead><tbody>
+          {evs.data.items.map((e) => <tr key={e.id}><td>{new Date(e.receivedAt).toLocaleString()}</td><td><code>{e.eventKey}</code></td><td><span className={`pill ${e.status === 'FAILED' ? 'warn' : e.status === 'PROCESSED' ? 'on' : ''}`}>{e.status.toLowerCase()}</span>{e.error ? <div className="err">{e.error}</div> : null}</td><td>{e.attempts}</td></tr>)}
+        </tbody></table> : null}
+      </section>
+    </>
+  );
+}
+
 interface MsgReportRow {
   report: { id: string; reason: string; details: string | null; status: string; createdAt: string };
   reporter: { displayName: string } | null; sender: { id: string; displayName: string; status: string } | null;
@@ -419,7 +463,7 @@ export function App() {
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
-  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['messages', 'Messages', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['sources', 'Sources', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['messages', 'Messages', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['billing', 'Billing', isAdmin], ['sources', 'Sources', isAdmin], ['jobs', 'Jobs', isAdmin]];
   const visible = tabs.filter(([, , show]) => show);
   const current = visible.find(([k]) => k === tab)?.[1] ?? '';
   return (
@@ -442,6 +486,7 @@ export function App() {
         {tab === 'users' && isAdmin ? <Users /> : null}
         {tab === 'countries' && isAdmin ? <Countries /> : null}
         {tab === 'audit' && isAdmin ? <Audit /> : null}
+        {tab === 'billing' && isAdmin ? <Billing /> : null}
         {tab === 'sources' && isAdmin ? <Sources /> : null}
         {tab === 'jobs' && isAdmin ? <Jobs /> : null}
       </main>

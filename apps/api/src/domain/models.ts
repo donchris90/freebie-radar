@@ -275,3 +275,48 @@ export interface MessageReportRec {
   status: ReportStatus;
   createdAt: Date;
 }
+
+export type SubscriptionStatus = 'NONE' | 'ACTIVE' | 'PAST_DUE' | 'CANCELLED';
+
+export interface SubscriptionRec {
+  userId: string;
+  tier: Tier;
+  status: SubscriptionStatus;
+  planKey: string | null;
+  provider: string | null;
+  providerRef: string | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+export type PaymentStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'ABANDONED' | 'REFUND_PENDING' | 'PARTIALLY_REFUNDED' | 'REFUNDED';
+
+export interface PaymentRec {
+  id: string;
+  userId: string;
+  provider: string;
+  reference: string;
+  providerPaymentRef: string | null;
+  planKey: string | null;
+  amountMinor: number;
+  currency: string;
+  status: PaymentStatus;
+  failureReason: string | null;
+  refundedMinor: number;
+  createdAt: Date;
+  paidAt: Date | null;
+}
+
+export type BillingEventStatus = 'RECEIVED' | 'PROCESSED' | 'IGNORED' | 'FAILED';
+
+export interface BillingEventRec {
+  id: string;
+  provider: string;
+  eventKey: string;
+  type: string;
+  status: BillingEventStatus;
+  error: string | null;
+  attempts: number;
+  receivedAt: Date;
+  processedAt: Date | null;
+}

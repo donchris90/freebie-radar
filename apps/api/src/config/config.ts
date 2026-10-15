@@ -1,5 +1,6 @@
 import { resolve } from 'path';
 import { DEFAULT_LAUNCH_COUNTRIES } from '../core/countries';
+import { parseMajorToMinor } from '../core/money';
 
 /** Runtime configuration. Market, currency, countries and limits come from the environment, not code. */
 
@@ -29,6 +30,17 @@ export interface PartnerFeedConfig {
   expireAfterHours: number;
   retireAfterHours: number;
   rateLimitPerMinute: number | null;
+}
+
+export interface PlanConfig {
+  key: string;
+  tier: 'PREMIUM';
+  interval: 'monthly' | 'annual';
+  title: string;
+  /** Price per currency, in minor units. */
+  prices: Record<string, number>;
+  /** The provider's own payment-plan id per currency (needed for recurring billing). */
+  planCodes: Record<string, string>;
 }
 
 export interface AppConfig {
@@ -64,6 +76,15 @@ export interface AppConfig {
   jobs: { enabled: boolean; redisUrl: string | null; queueName: string; /** Test hook: run every job at this interval instead of its own. */ intervalOverrideMs: number | null };
   /** Partner listing feeds (see docs/LISTING_SOURCES.md). Each one is read from PARTNER_FEED_<KEY>_* variables. */
   partnerFeeds: PartnerFeedConfig[];
+  /** Paid plans. Billing is off until a provider is configured. */
+  billing: {
+    provider: 'flutterwave' | null;
+    flutterwave: { secretKey: string | null; secretHash: string | null; baseUrl: string };
+    plans: PlanConfig[];
+    graceDays: number;
+    /** Whether the iOS app may start web checkout. Off by default: see docs/BILLING.md on store rules. */
+    allowIos: boolean;
+  };
   /** Abuse limits for in-app messages. */
   messaging: { newConversationsPerDay: number; messagesPerHour: number; maxUnanswered: number; maxBodyChars: number };
   /** Sync tuning. */
@@ -134,6 +155,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       rateLimitPerMinute: env[`${p}RATE_LIMIT_PER_MINUTE`] ? int(env[`${p}RATE_LIMIT_PER_MINUTE`], 0) || null : null,
     };
   });
+  const billingProvider = env.BILLING_PROVIDER ? env.BILLING_PROVIDER.toLowerCase() : null;
+  if (billingProvider && billingProvider !== 'flutterwave') throw new Error(`BILLING_PROVIDER "${billingProvider}" is not implemented. Supported: flutterwave`);
+  const flwKey = env.FLUTTERWAVE_SECRET_KEY || null;
+  const flwHash = env.FLUTTERWAVE_SECRET_HASH || null;
+  if (billingProvider === 'flutterwave') {
+    if (!flwKey || !flwHash) throw new Error('BILLING_PROVIDER=flutterwave needs FLUTTERWAVE_SECRET_KEY and FLUTTERWAVE_SECRET_HASH');
+    if (nodeEnv === 'production' && /TEST/i.test(flwKey)) throw new Error('Production must not use a Flutterwave test key');
+    if (flwHash.length < 16) throw new Error('FLUTTERWAVE_SECRET_HASH must be a long random string (16+ characters)');
+  }
+  const pairs = (v: string | undefined) => Object.fromEntries((v ?? '').split(',').map((p) => p.trim()).filter(Boolean).map((p) => { const i = p.indexOf(':'); return [p.slice(0, i).trim().toUpperCase(), p.slice(i + 1).trim()]; }));
+  const priceMinor = Object.fromEntries(Object.entries(pairs(env.PREMIUM_MONTHLY_PRICES)).map(([c, v]) => [c, parseMajorToMinor(v, c)]));
+  const plans: PlanConfig[] = billingProvider && Object.keys(priceMinor).length
+    ? [{ key: 'premium_monthly', tier: 'PREMIUM', interval: 'monthly', title: 'Premium', prices: priceMinor, planCodes: pairs(env.FLUTTERWAVE_PREMIUM_MONTHLY_PLAN_IDS) }]
+    : [];
+  if (billingProvider && plans.length) {
+    const missing = Object.keys(priceMinor).filter((c) => !plans[0].planCodes[c]);
+    if (missing.length) throw new Error(`FLUTTERWAVE_PREMIUM_MONTHLY_PLAN_IDS is missing a plan code for: ${missing.join(', ')}`);
+  }
   const list = (v: string | undefined, d: string[]) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
   return {
     nodeEnv,
@@ -153,6 +192,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicBaseUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/$/, '') : null,
     jobs: { enabled: jobsEnabled, redisUrl, queueName: env.JOBS_QUEUE_NAME ?? 'freebie-radar-jobs', intervalOverrideMs: env.JOBS_INTERVAL_MS ? int(env.JOBS_INTERVAL_MS, 0) || null : null },
     partnerFeeds,
+    billing: { provider: billingProvider as 'flutterwave' | null, flutterwave: { secretKey: flwKey, secretHash: flwHash, baseUrl: env.FLUTTERWAVE_BASE_URL ?? 'https://api.flutterwave.com' }, plans, graceDays: int(env.BILLING_GRACE_DAYS, 3), allowIos: env.BILLING_ALLOW_IOS === 'true' },
     messaging: { newConversationsPerDay: int(env.MSG_NEW_CONVERSATIONS_PER_DAY, 10), messagesPerHour: int(env.MSG_PER_HOUR, 30), maxUnanswered: int(env.MSG_MAX_UNANSWERED, 5), maxBodyChars: int(env.MSG_MAX_CHARS, 1000) },
     sync: { everyMs: int(env.SYNC_INTERVAL_MINUTES, 60) * 60_000, pageSize: int(env.SYNC_PAGE_SIZE, 100), maxPages: int(env.SYNC_MAX_PAGES, 50), maxRunMs: int(env.SYNC_MAX_RUN_SECONDS, 240) * 1000 },
     refreshTtlDays: int(env.REFRESH_TTL_DAYS, 30),

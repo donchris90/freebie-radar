@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 process.env.AUTH_THROTTLE_LIMIT = '10000';
 process.env.MAIL_THROTTLE_LIMIT = '10000';
 process.env.MSG_THROTTLE_LIMIT = '10000';
+process.env.BILLING_THROTTLE_LIMIT = '10000';
 process.env.THROTTLE_LIMIT = '100000';
 process.env.REFRESH_REUSE_GRACE_SECONDS = '0';
 process.env.CODE_RESEND_SECONDS = '0';

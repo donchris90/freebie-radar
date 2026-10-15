@@ -186,6 +186,7 @@ model User {
   sellerConversations Conversation[]     @relation("convSeller")
   messagesSent     Message[]             @relation("messageSender")
   messageReports   MessageReport[]       @relation("messageReporter")
+  payments         Payment[]
   calculations     ResaleCalculation[]
   dismissals       ListingDismissal[]
   interactions     CategoryInteraction[]
@@ -556,6 +557,8 @@ model Subscription {
   status          SubscriptionStatus @default(NONE)
   provider        String?
   providerRef     String?            @unique
+  planKey         String?
+  cancelAtPeriodEnd Boolean          @default(false)
   currentPeriodEnd DateTime?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -736,4 +739,40 @@ model MessageReport {
 
   @@unique([messageId, reporterId])
   @@index([status, createdAt])
+}
+
+// ---- Billing: provider-neutral. `reference` is ours and is the idempotency key for checkout. ----
+model Payment {
+  id               String   @id @default(uuid())
+  userId           String
+  provider         String
+  reference        String   @unique
+  providerPaymentRef String? @unique // the provider's id for the charge, so a replayed charge is never recorded twice
+  planKey          String?
+  amountMinor      Int
+  currency         String   @db.Char(3)
+  status           String   // PENDING | SUCCEEDED | FAILED | ABANDONED | REFUND_PENDING | PARTIALLY_REFUNDED | REFUNDED
+  failureReason    String?
+  refundedMinor    Int      @default(0)
+  createdAt        DateTime @default(now())
+  paidAt           DateTime?
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model BillingEvent {
+  id          String   @id @default(uuid())
+  provider    String
+  eventKey    String   // derived from the event name and the provider's object id: providers send no event id
+  type        String
+  status      String   // RECEIVED | PROCESSED | IGNORED | FAILED
+  error       String?
+  attempts    Int      @default(1)
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, eventKey])
+  @@index([status, receivedAt])
 }

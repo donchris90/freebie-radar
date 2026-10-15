@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { haversineKm } from '../../core/geo';
 import { isPubliclyListed } from '../../core/lifecycle';
 import { normalizeText } from '../../core/dedup';
@@ -6,6 +7,7 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  BillingEventRec,
   ConversationRec,
   CountryRec,
   DeliveryRec,
@@ -15,10 +17,12 @@ import type {
   BlockRec,
   CodeRec,
   ModerationRec,
+  PaymentRec,
   RefreshRec,
   ReportRec,
   ResaleRec,
   SourceRec,
+  SubscriptionRec,
   SyncRunRec,
   UserRec,
 } from '../../domain/models';
@@ -42,6 +46,9 @@ export function createMemoryRepos(): Repos {
   const deliveries = new Map<string, DeliveryRec>();
   const resale = new Map<string, ResaleRec>();
   const audit: AuditRec[] = [];
+  const subscriptions = new Map<string, SubscriptionRec>();
+  const payments = new Map<string, PaymentRec>();
+  const billingEvents = new Map<string, BillingEventRec>();
   const conversations = new Map<string, ConversationRec>();
   const messages: MessageRec[] = [];
   const messageReports = new Map<string, MessageReportRec>();
@@ -332,6 +339,47 @@ export function createMemoryRepos(): Repos {
         return { items: rows.slice(offset, offset + limit).map(clone), total: rows.length };
       },
       async setReportStatus(id, status) { const r = messageReports.get(id); if (r) r.status = status; },
+    },
+
+    billing: {
+      async getSubscription(userId) { const s = subscriptions.get(userId); return s ? clone(s) : null; },
+      async findSubscriptionByRef(provider, ref) {
+        const s = [...subscriptions.values()].find((x) => x.provider === provider && x.providerRef === ref);
+        return s ? clone(s) : null;
+      },
+      async saveSubscription(s) { subscriptions.set(s.userId, clone(s)); },
+      async listSubscriptions(statuses) { return [...subscriptions.values()].filter((s) => statuses.includes(s.status)).map(clone); },
+      async insertPayment(p) {
+        const all = [...payments.values()];
+        if (all.some((x) => x.reference === p.reference || (p.providerPaymentRef && x.providerPaymentRef === p.providerPaymentRef))) return null;
+        payments.set(p.id, clone(p));
+        return clone(p);
+      },
+      async findPayment(reference) { const p = [...payments.values()].find((x) => x.reference === reference); return p ? clone(p) : null; },
+      async findPaymentByProviderRef(ref) { const p = [...payments.values()].find((x) => x.providerPaymentRef === ref); return p ? clone(p) : null; },
+      async transitionPayment(id, from, patch) {
+        const p = payments.get(id);
+        if (!p || !from.includes(p.status)) return false;
+        Object.assign(p, clone(patch));
+        return true;
+      },
+      async listPayments(f) {
+        const rows = [...payments.values()].filter((p) => !f.userId || p.userId === f.userId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return { items: rows.slice(f.offset, f.offset + f.limit).map(clone), total: rows.length };
+      },
+      async stalePending(before) { return [...payments.values()].filter((p) => p.status === 'PENDING' && p.createdAt < before).map(clone); },
+      async beginEvent(provider, eventKey, type) {
+        const existing = [...billingEvents.values()].find((e) => e.provider === provider && e.eventKey === eventKey);
+        if (existing) return { event: clone(existing), created: false };
+        const event: BillingEventRec = { id: randomUUID(), provider, eventKey, type, status: 'RECEIVED', error: null, attempts: 1, receivedAt: new Date(), processedAt: null };
+        billingEvents.set(event.id, event);
+        return { event: clone(event), created: true };
+      },
+      async retryEvent(id) { const e = billingEvents.get(id); if (e) { e.attempts++; e.status = 'RECEIVED'; e.error = null; } },
+      async finishEvent(id, status, error) { const e = billingEvents.get(id); if (e) { e.status = status; e.error = error; e.processedAt = new Date(); } },
+      async listEvents(f) {
+        return [...billingEvents.values()].filter((e) => !f.status || e.status === f.status).sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime()).slice(0, f.limit).map(clone);
+      },
     },
 
     alerts: {

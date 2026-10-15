@@ -3,6 +3,7 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  BillingEventRec,
   BlockRec,
   CodePurpose,
   CodeRec,
@@ -15,12 +16,14 @@ import type {
   MessageRec,
   MessageReportRec,
   ModerationRec,
+  PaymentRec,
   RefreshRec,
   ReportRec,
   ReportReason,
   ReportStatus,
   ResaleRec,
   SourceRec,
+  SubscriptionRec,
   SyncRunRec,
   UserRec,
 } from './models';
@@ -155,6 +158,27 @@ export interface ConversationRepo {
   setReportStatus(id: string, status: MessageReportRec['status']): Promise<void>;
 }
 
+export interface BillingRepo {
+  getSubscription(userId: string): Promise<SubscriptionRec | null>;
+  findSubscriptionByRef(provider: string, providerRef: string): Promise<SubscriptionRec | null>;
+  saveSubscription(s: SubscriptionRec): Promise<void>;
+  listSubscriptions(statuses: SubscriptionRec['status'][]): Promise<SubscriptionRec[]>;
+  /** Returns null when the reference or the provider's payment id is already recorded. */
+  insertPayment(p: PaymentRec): Promise<PaymentRec | null>;
+  findPayment(reference: string): Promise<PaymentRec | null>;
+  findPaymentByProviderRef(providerPaymentRef: string): Promise<PaymentRec | null>;
+  /** Atomic: applies the patch only if the payment is still in `from`. True for the one caller that won. */
+  transitionPayment(id: string, from: PaymentRec['status'][], patch: Partial<Omit<PaymentRec, 'id'>>): Promise<boolean>;
+  listPayments(f: { userId?: string; offset: number; limit: number }): Promise<{ items: PaymentRec[]; total: number }>;
+  stalePending(before: Date): Promise<PaymentRec[]>;
+  /** Records a delivery. `created` is false when this provider/eventKey was seen before. */
+  beginEvent(provider: string, eventKey: string, type: string): Promise<{ event: BillingEventRec; created: boolean }>;
+  /** A retried delivery of an event that did not finish. */
+  retryEvent(id: string): Promise<void>;
+  finishEvent(id: string, status: BillingEventRec['status'], error: string | null): Promise<void>;
+  listEvents(f: { status?: BillingEventRec['status']; limit: number }): Promise<BillingEventRec[]>;
+}
+
 export interface AlertRepo {
   create(a: AlertRec): Promise<AlertRec>;
   listByUser(userId: string): Promise<AlertRec[]>;
@@ -223,6 +247,7 @@ export interface Repos {
   saved: SavedRepo;
   reports: ReportRepo;
   conversations: ConversationRepo;
+  billing: BillingRepo;
   alerts: AlertRepo;
   resale: ResaleRepo;
   audit: AuditRepo;
