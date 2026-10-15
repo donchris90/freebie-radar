@@ -2,7 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { PUSH_SENDER, REPOS, Repos, PushMessage } from '../src/domain/ports';
+import { PRISMA, PUSH_SENDER, REPOS, Repos, PushMessage } from '../src/domain/ports';
+import { resetTestDatabase } from '../src/infra/prisma/prisma.repos';
 import { AlertsService } from '../src/engagement/alerts';
 import { configureApp } from '../src/main';
 
@@ -21,6 +22,8 @@ function fakePush() {
 async function boot() {
   const push = fakePush();
   const mod = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(PUSH_SENDER).useValue(push).compile();
+  const prisma = mod.get(PRISMA, { strict: false });
+  if (prisma) await resetTestDatabase(prisma); // Postgres runs start from empty tables
   const app = mod.createNestApplication();
   configureApp(app);
   await app.init();

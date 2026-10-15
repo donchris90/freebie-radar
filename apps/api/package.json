@@ -11,7 +11,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "test:pg": "node scripts/test-pg.js"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.0",
@@ -59,7 +60,9 @@
       "^.+\\.ts$": "ts-jest"
     },
     "testEnvironment": "node",
-    "setupFiles": ["<rootDir>/test/env.ts"],
+    "setupFiles": [
+      "<rootDir>/test/env.ts"
+    ],
     "testTimeout": 30000
   }
 }

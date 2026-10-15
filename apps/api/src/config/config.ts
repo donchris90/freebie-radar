@@ -27,6 +27,8 @@ export interface AppConfig {
   /** Max saved alerts by tier. Values are configuration, not pricing decisions. */
   alertLimits: Record<'FREE' | 'PREMIUM' | 'BUSINESS', number>;
   reportThreshold: number;
+  /** Persistence adapter. Production always uses the database; the in-memory store refuses to start there. */
+  store: 'memory' | 'prisma';
 }
 
 const int = (v: string | undefined, d: number) => (v && /^\d+$/.test(v) ? Number(v) : d);
@@ -37,6 +39,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (nodeEnv === 'production' && (secret.length < 32 || secret.startsWith('change-me'))) {
     throw new Error('JWT_SECRET must be set to a long random value in production');
   }
+  const storeRaw = (env.STORE ?? (nodeEnv === 'production' ? 'prisma' : 'memory')).toLowerCase();
+  if (storeRaw !== 'memory' && storeRaw !== 'prisma') throw new Error('STORE must be "memory" or "prisma"');
+  if (storeRaw === 'prisma' && !env.DATABASE_URL) throw new Error('DATABASE_URL is required when STORE=prisma');
   const list = (v: string | undefined, d: string[]) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
   return {
     nodeEnv,
@@ -50,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throttleLimit: int(env.THROTTLE_LIMIT, 120),
     alertLimits: { FREE: int(env.ALERT_LIMIT_FREE, 3), PREMIUM: int(env.ALERT_LIMIT_PREMIUM, 25), BUSINESS: int(env.ALERT_LIMIT_BUSINESS, 50) },
     reportThreshold: int(env.REPORT_THRESHOLD, 2),
+    store: storeRaw,
   };
 }
 

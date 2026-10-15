@@ -1,17 +1,27 @@
-import { Controller, Get, Module } from '@nestjs/common';
+import { Controller, Get, Inject, Injectable, Module, OnModuleDestroy } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminController, AppealController, ModerationService } from './admin/admin';
 import { AuthController, AuthService, JwtAuthGuard, OptionalAuthGuard, RolesGuard } from './auth/auth';
 import { APP_CONFIG, loadConfig } from './config/config';
-import { PUSH_SENDER, REPOS } from './domain/ports';
+import { PrismaClient } from '@prisma/client';
+import { PRISMA, PUSH_SENDER, REPOS, Repos } from './domain/ports';
 import { AlertsController, AlertsService, ExpoPushSender } from './engagement/alerts';
 import { EngagementController, ReportsService, ResaleService, SavedService } from './engagement/engagement';
 import { createMemoryRepos } from './infra/memory/memory.repos';
+import { createPrismaRepos } from './infra/prisma/prisma.repos';
 import { ListingsController, ListingsService } from './listings/listings';
 
 const config = loadConfig();
+
+@Injectable()
+class PrismaLifecycle implements OnModuleDestroy {
+  constructor(@Inject(PRISMA) private readonly prisma: PrismaClient | null) {}
+  async onModuleDestroy() {
+    await this.prisma?.$disconnect();
+  }
+}
 
 @Controller('health')
 class HealthController {
@@ -29,12 +39,15 @@ class HealthController {
   controllers: [HealthController, AuthController, ListingsController, EngagementController, AlertsController, AdminController, AppealController],
   providers: [
     { provide: APP_CONFIG, useValue: config },
+    { provide: PRISMA, useFactory: (): PrismaClient | null => (config.store === 'prisma' ? new PrismaClient() : null) },
     {
       provide: REPOS,
-      // Only the in-memory adapter exists in this build; it refuses to start in production.
-      // A Prisma adapter implementing the same Repos interface is the next step (see README).
-      useFactory: () => createMemoryRepos(),
+      inject: [PRISMA],
+      // STORE=prisma uses PostgreSQL; the in-memory adapter is for tests and local development only
+      // and refuses to start when NODE_ENV=production.
+      useFactory: (prisma: PrismaClient | null): Repos => (prisma ? createPrismaRepos(prisma) : createMemoryRepos()),
     },
+    PrismaLifecycle,
     { provide: PUSH_SENDER, useClass: ExpoPushSender },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     JwtAuthGuard,

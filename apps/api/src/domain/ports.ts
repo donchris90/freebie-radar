@@ -142,6 +142,8 @@ export interface Repos {
 }
 
 export const REPOS = Symbol('REPOS');
+/** The PrismaClient, or null when running on the in-memory adapter. */
+export const PRISMA = Symbol('PRISMA');
 
 export interface PushMessage {
   token: string;
