@@ -22,6 +22,8 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
+  ForbiddenException,
   Get,
   Inject,
   Injectable,
@@ -121,6 +123,9 @@ export class ListingsService {
 
   async create(user: UserRec, dto: CreateListingDto) {
     const now = new Date();
+    if (this.cfg.requireVerifiedEmail && !user.emailVerifiedAt && user.role === 'USER') {
+      throw new ForbiddenException('Verify your email before posting. Open Profile and enter the code we sent you.');
+    }
     if (!this.cfg.categories.includes(dto.categoryKey)) throw new BadRequestException('Unknown category');
     if (!isValidCoordinate(dto.lat, dto.lng)) throw new BadRequestException('Invalid coordinates');
     for (const raw of dto.imageUrls ?? []) {
@@ -223,7 +228,8 @@ export class ListingsService {
     const unit = q.unit ?? viewer?.prefs.distanceUnit ?? 'km';
     const center = this.resolveCenter(q, viewer);
     const filter = this.buildFilter(q, viewer, center);
-    const { items, total } = await this.repos.listings.search(filter);
+    const blockedSellers = viewer ? await this.repos.blocks.blockedIds(viewer.id) : [];
+    const { items, total } = await this.repos.listings.search({ ...filter, excludeSellerIds: blockedSellers });
     const ctx: ViewCtx = { viewer, center, unit, now: new Date() };
     const dismissed = viewer ? new Set(await this.repos.saved.dismissedIds(viewer.id)) : new Set<string>();
     const views = await Promise.all(items.filter((l) => !dismissed.has(l.id)).map((l) => this.toPublic(l, ctx)));
@@ -236,9 +242,31 @@ export class ListingsService {
     if (!l) throw new NotFoundException('Listing not found');
     const privileged = viewer && (viewer.id === l.sellerUserId || viewer.role === 'MODERATOR' || viewer.role === 'ADMIN');
     if (!isPubliclyListed(l.status) && !privileged) throw new NotFoundException('Listing not found');
+    if (viewer && !privileged && l.sellerUserId && (await this.repos.blocks.blockedIds(viewer.id)).includes(l.sellerUserId)) throw new NotFoundException('Listing not found');
     if (viewer) await this.repos.saved.bumpCategory(viewer.id, l.categoryKey);
     const view = await this.toPublic(l, { viewer, center: viewer ? this.homeCenter(viewer) : null, unit: viewer?.prefs.distanceUnit, now: new Date() });
     return { ...view, safetyGuidance: SAFETY_GUIDANCE };
+  }
+
+  /** Hides a seller's listings from the blocker's feeds, search and saved list. The seller is not told. */
+  async blockSeller(user: UserRec, listingId: string) {
+    const l = await this.repos.listings.findById(listingId);
+    if (!l || !isPubliclyListed(l.status)) throw new NotFoundException('Listing not found');
+    if (!l.sellerUserId) throw new BadRequestException('This listing comes from an outside source, so there is no seller account to block.');
+    if (l.sellerUserId === user.id) throw new BadRequestException('You cannot block yourself.');
+    await this.repos.blocks.add(user.id, l.sellerUserId);
+    return { blocked: true };
+  }
+
+  async listBlocks(user: UserRec) {
+    const rows = await this.repos.blocks.list(user.id);
+    const items = await Promise.all(rows.map(async (b) => ({ userId: b.blockedId, displayName: (await this.repos.users.findById(b.blockedId))?.displayName ?? 'Unknown user', blockedAt: b.createdAt.toISOString() })));
+    return { items };
+  }
+
+  async unblock(user: UserRec, userId: string) {
+    if (!(await this.repos.blocks.remove(user.id, userId))) throw new NotFoundException('You have not blocked that user.');
+    return { blocked: false };
   }
 
   async mine(user: UserRec) {
@@ -250,7 +278,8 @@ export class ListingsService {
   async viewMany(ids: string[], viewer: UserRec) {
     const ctx: ViewCtx = { viewer, center: this.homeCenter(viewer), unit: viewer.prefs.distanceUnit, now: new Date() };
     const found = await Promise.all(ids.map((id) => this.repos.listings.findById(id)));
-    const visible = found.filter((l): l is ListingRec => !!l && isPubliclyListed(l.status));
+    const blocked = new Set(await this.repos.blocks.blockedIds(viewer.id));
+    const visible = found.filter((l): l is ListingRec => !!l && isPubliclyListed(l.status) && !(l.sellerUserId && blocked.has(l.sellerUserId)));
     return Promise.all(visible.map((l) => this.toPublic(l, ctx)));
   }
 
@@ -441,6 +470,24 @@ export class ListingsController {
   @Get('listings/:id')
   get(@Param('id') id: string, @CurrentUser() viewer?: UserRec) {
     return this.svc.get(id, viewer);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('listings/:id/block-seller')
+  blockSeller(@Param('id') id: string, @CurrentUser() user: UserRec) {
+    return this.svc.blockSeller(user, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/blocks')
+  blocks(@CurrentUser() user: UserRec) {
+    return this.svc.listBlocks(user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me/blocks/:userId')
+  unblock(@Param('userId') userId: string, @CurrentUser() user: UserRec) {
+    return this.svc.unblock(user, userId);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -14,7 +14,7 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 );
 
 export default function Profile() {
-  const { user, logout, refresh } = useAuth();
+  const { user, logout, logoutEverywhere, refresh } = useAuth();
   const [busy, setBusy] = useState(false);
   const patch = async (body: object) => { try { await api('/me/preferences', { method: 'PATCH', body }); await refresh(); } catch (e) { Alert.alert('Could not save', (e as ApiError).message); } };
 
@@ -52,6 +52,13 @@ export default function Profile() {
           </View>
           <View style={{ flex: 1 }}><Text style={type.title} numberOfLines={1}>{user.displayName}</Text><Text style={type.small} numberOfLines={1}>{user.email} · {user.tier.toLowerCase()} plan</Text></View>
         </View>
+        {!user.emailVerified ? (
+          <Panel style={{ backgroundColor: colors.stickerSoft, borderColor: colors.sticker, gap: space.sm }}>
+            <Text style={type.h2}>Verify your email</Text>
+            <Text style={type.body}>Confirm {user.email} to post listings and be able to reset your password.</Text>
+            <Button title="Enter verification code" onPress={() => router.push('/verify-email')} />
+          </Panel>
+        ) : null}
         <View style={{ gap: space.sm }}>
           <Button icon="add-circle" title="Post an item" onPress={() => router.push('/sell')} />
           <Button title="My listings" kind="secondary" onPress={() => router.push('/my-listings')} />
@@ -67,6 +74,12 @@ export default function Profile() {
         <Panel style={{ gap: space.sm }}>
           <Text style={type.h2}>Privacy</Text>
           <Text style={type.body}>Your location is used only when the app is open, and only to find nearby listings. Other people only ever see an approximate location for your listings.</Text>
+        </Panel>
+        <Panel style={{ gap: space.sm }}>
+          <Text style={type.h2}>Account safety</Text>
+          <Button title="Change password" kind="secondary" onPress={() => router.push('/change-password')} />
+          <Button title="Blocked sellers" kind="secondary" onPress={() => router.push('/blocked')} />
+          <Button title="Sign out of all devices" kind="secondary" onPress={() => Alert.alert('Sign out of all devices?', 'Every phone and browser signed in to your account, including this one, will be signed out.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out everywhere', style: 'destructive', onPress: async () => { try { await logoutEverywhere(); } catch (e) { Alert.alert('Could not sign out', (e as ApiError).message); } } }])} />
         </Panel>
         <Button title="Sign out" kind="secondary" onPress={logout} />
         <Button title="Delete my account" kind="danger" onPress={() => Alert.alert('Delete account?', 'This removes your listings and anonymises your account. It cannot be undone.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { try { await api('/me', { method: 'DELETE' }); await logout(); } catch (e) { Alert.alert('Could not delete', (e as ApiError).message); } } }])} />

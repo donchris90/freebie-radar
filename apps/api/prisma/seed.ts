@@ -34,7 +34,7 @@ async function main() {
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-      await prisma.user.update({ where: { email }, data: { role: 'ADMIN', status: 'ACTIVE' } });
+      await prisma.user.update({ where: { email }, data: { role: 'ADMIN', status: 'ACTIVE', emailVerifiedAt: new Date() } });
       console.log(`Existing account ${email} promoted to ADMIN (password unchanged).`);
       return;
     }
@@ -45,6 +45,7 @@ async function main() {
         passwordHash: await bcrypt.hash(password, 11),
         displayName: 'Administrator',
         role: 'ADMIN',
+        emailVerifiedAt: new Date(),
         countryCode: (process.env.DEFAULT_COUNTRY ?? 'US').toUpperCase(),
         preference: { create: {} },
       },

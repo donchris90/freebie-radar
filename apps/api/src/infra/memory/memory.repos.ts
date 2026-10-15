@@ -9,7 +9,10 @@ import type {
   CountryRec,
   DeliveryRec,
   ListingRec,
+  BlockRec,
+  CodeRec,
   ModerationRec,
+  RefreshRec,
   ReportRec,
   ResaleRec,
   UserRec,
@@ -37,10 +40,14 @@ export function createMemoryRepos(): Repos {
   const moderation = new Map<string, ModerationRec>();
   const appeals = new Map<string, AppealRec>();
   const countries = new Map<string, CountryRec>();
+  const refresh = new Map<string, RefreshRec>();
+  const codes = new Map<string, CodeRec>();
+  const blocks = new Map<string, BlockRec>();
 
   const matchesFilter = (l: ListingRec, f: ListingSearchFilter): boolean => {
     if (f.publicOnly && (!isPubliclyListed(l.status) || l.duplicateOfId !== null)) return false;
     if (f.sellerUserId && l.sellerUserId !== f.sellerUserId) return false;
+    if (f.excludeSellerIds?.length && l.sellerUserId && f.excludeSellerIds.includes(l.sellerUserId)) return false;
     if (f.categoryKey && l.categoryKey !== f.categoryKey) return false;
     if (f.countryCode && l.countryCode !== f.countryCode) return false;
     if (f.condition && l.condition !== f.condition) return false;
@@ -71,6 +78,41 @@ export function createMemoryRepos(): Repos {
         c.enabled = enabled;
         return clone(c);
       },
+    },
+
+    tokens: {
+      async addRefresh(r) { refresh.set(r.id, clone(r)); },
+      async findRefresh(hash) { for (const r of refresh.values()) if (r.tokenHash === hash) return clone(r); return null; },
+      async revokeRefresh(id, at) {
+        const r = refresh.get(id);
+        if (!r || r.revokedAt) return false;
+        r.revokedAt = at;
+        return true;
+      },
+      async revokeFamily(familyId, at) { for (const r of refresh.values()) if (r.familyId === familyId && !r.revokedAt) r.revokedAt = at; },
+      async revokeAllForUser(userId, at) { for (const r of refresh.values()) if (r.userId === userId && !r.revokedAt) r.revokedAt = at; },
+      async addCode(c) {
+        for (const o of codes.values()) if (o.userId === c.userId && o.purpose === c.purpose && !o.usedAt) o.usedAt = c.createdAt;
+        codes.set(c.id, clone(c));
+      },
+      async latestCode(userId, purpose) {
+        const mine = [...codes.values()].filter((c) => c.userId === userId && c.purpose === purpose).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return mine[0] ? clone(mine[0]) : null;
+      },
+      async bumpCodeAttempts(id) { const c = codes.get(id)!; c.attempts += 1; return c.attempts; },
+      async consumeCode(id, at) {
+        const c = codes.get(id);
+        if (!c || c.usedAt) return false;
+        c.usedAt = at;
+        return true;
+      },
+    },
+
+    blocks: {
+      async add(blockerId, blockedId) { const k = `${blockerId}:${blockedId}`; if (!blocks.has(k)) blocks.set(k, { blockerId, blockedId, createdAt: new Date() }); },
+      async remove(blockerId, blockedId) { return blocks.delete(`${blockerId}:${blockedId}`); },
+      async list(blockerId) { return [...blocks.values()].filter((b) => b.blockerId === blockerId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).map(clone); },
+      async blockedIds(blockerId) { return [...blocks.values()].filter((b) => b.blockerId === blockerId).map((b) => b.blockedId); },
     },
 
     users: {

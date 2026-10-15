@@ -98,7 +98,10 @@ export default function ListingDetail() {
           {l.isOwner ? <>
             <Button title="Still available — confirm" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/confirm`, { method: 'POST' }), 'Thanks, availability confirmed.')} />
             <Button title="Mark as unavailable" kind="secondary" busy={busy} onPress={() => guard(() => api(`/listings/${l.id}/unavailable`, { method: 'POST' }), 'Marked as unavailable.')} />
-          </> : <Button title="Report this listing" kind="secondary" onPress={() => (user ? setReporting(true) : router.push('/login'))} />}
+          </> : <>
+            <Button title="Report this listing" kind="secondary" onPress={() => (user ? setReporting(true) : router.push('/login'))} />
+            {!l.externalUrl ? <Button title="Block this seller" kind="secondary" onPress={() => (user ? Alert.alert('Block this seller?', 'Their listings will disappear from your feeds and search. They are not told. You can undo this in Profile.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Block', style: 'destructive', onPress: () => void guard(async () => { await api(`/listings/${l.id}/block-seller`, { method: 'POST' }); router.back(); }) }]) : router.push('/login'))} /> : null}
+          </>}
         </View>
       </View>
 

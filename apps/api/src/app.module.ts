@@ -14,6 +14,7 @@ import { createPrismaRepos } from './infra/prisma/prisma.repos';
 import { AdminCountriesController, CountriesController } from './countries/countries.controller';
 import { CountriesService } from './countries/countries.service';
 import { createStorage, STORAGE } from './storage/storage';
+import { createMailer, MAILER } from './mail/mailer';
 import { UploadsController } from './storage/uploads.controller';
 import { ListingsController, ListingsService } from './listings/listings';
 
@@ -53,6 +54,7 @@ class HealthController {
     },
     PrismaLifecycle,
     { provide: STORAGE, useFactory: () => createStorage(config) },
+    { provide: MAILER, useFactory: () => createMailer(config) },
     { provide: PUSH_SENDER, useClass: ExpoPushSender },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     JwtAuthGuard,

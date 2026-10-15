@@ -35,6 +35,13 @@ export class ResolveAppealDto {
   @IsIn(['UPHELD', 'REJECTED']) decision!: 'UPHELD' | 'REJECTED';
   @IsString() @Length(3, 500) note!: string;
 }
+export class UserStatusDto {
+  @IsIn(['ACTIVE', 'SUSPENDED']) status!: 'ACTIVE' | 'SUSPENDED';
+  @IsString() @Length(3, 500) reason!: string;
+}
+export class UserLookupDto {
+  @IsString() @Length(3, 254) email!: string;
+}
 export class PageDto {
   @IsOptional() @IsIn(['OPEN', 'IN_REVIEW', 'ACTIONED', 'DISMISSED']) status?: 'OPEN' | 'IN_REVIEW' | 'ACTIONED' | 'DISMISSED';
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
@@ -112,6 +119,38 @@ export class ModerationService {
     return { id, status: dto.decision };
   }
 
+  private adminUser(u: UserRec) {
+    return { id: u.id, email: u.email, displayName: u.displayName, role: u.role, status: u.status, emailVerified: !!u.emailVerifiedAt, countryCode: u.countryCode, createdAt: u.createdAt.toISOString() };
+  }
+
+  async findUser(q: UserLookupDto) {
+    const u = await this.repos.users.findByEmail(q.email.trim().toLowerCase());
+    if (!u) throw new NotFoundException('No account with that email');
+    return this.adminUser(u);
+  }
+
+  /** Suspending signs the person out everywhere and holds their public listings for review. Restoring does not republish them. */
+  async setUserStatus(admin: UserRec, id: string, dto: UserStatusDto) {
+    const u = await this.repos.users.findById(id);
+    if (!u || u.status === 'DELETED') throw new NotFoundException('Account not found');
+    if (u.id === admin.id) throw new ForbiddenException('You cannot change your own account status.');
+    if (u.role === 'ADMIN') throw new ForbiddenException('Admin accounts cannot be suspended here.');
+    if (u.status === dto.status) return this.adminUser(u);
+    let held = 0;
+    if (dto.status === 'SUSPENDED') {
+      await this.repos.users.update(u.id, { status: 'SUSPENDED', tokenVersion: u.tokenVersion + 1 });
+      await this.repos.tokens.revokeAllForUser(u.id, new Date());
+      const own = await this.repos.listings.search({ sellerUserId: u.id, publicOnly: false, sort: 'newest', offset: 0, limit: 1000 });
+      for (const l of own.items) {
+        if (canTransition(l.status, 'MODERATOR_UNDER_REVIEW')) { await this.repos.listings.update(l.id, { status: transition(l.status, 'MODERATOR_UNDER_REVIEW') }); held++; }
+      }
+    } else {
+      await this.repos.users.update(u.id, { status: 'ACTIVE' });
+    }
+    await this.repos.audit.add({ id: randomUUID(), actorId: admin.id, action: dto.status === 'SUSPENDED' ? 'USER_SUSPENDED' : 'USER_RESTORED', entityType: 'User', entityId: u.id, metadata: { reason: dto.reason, listingsHeld: held }, createdAt: new Date() });
+    return this.adminUser((await this.repos.users.findById(u.id))!);
+  }
+
   async stats() { return this.repos.stats.stats(); }
   async audit(q: PageDto) { return this.repos.audit.list(q.offset ?? 0, q.limit ?? 50); }
   runExpiry() { return this.listings.runExpiry(); }
@@ -133,6 +172,11 @@ export class AdminController {
   appeals() { return this.svc.appeals(); }
   @Roles('MODERATOR', 'ADMIN') @Post('admin/appeals/:id/resolve')
   resolveAppeal(@CurrentUser() u: UserRec, @Param('id') id: string, @Body() dto: ResolveAppealDto) { return this.svc.resolveAppeal(u, id, dto); }
+
+  @Roles('ADMIN') @Get('admin/users')
+  user(@Query() q: UserLookupDto) { return this.svc.findUser(q); }
+  @Roles('ADMIN') @Post('admin/users/:id/status')
+  userStatus(@CurrentUser() u: UserRec, @Param('id') id: string, @Body() dto: UserStatusDto) { return this.svc.setUserStatus(u, id, dto); }
 
   @Roles('ADMIN') @Get('admin/stats')
   stats() { return this.svc.stats(); }

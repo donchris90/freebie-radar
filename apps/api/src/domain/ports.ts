@@ -3,12 +3,16 @@ import type {
   AlertRec,
   AppealRec,
   AuditRec,
+  BlockRec,
+  CodePurpose,
+  CodeRec,
   Condition,
   CountryRec,
   DeliveryRec,
   DeliveryStatus,
   ListingRec,
   ModerationRec,
+  RefreshRec,
   ReportRec,
   ReportReason,
   ReportStatus,
@@ -35,6 +39,8 @@ export interface ListingSearchFilter {
   radiusKm?: number;
   sort: 'newest' | 'nearest';
   sellerUserId?: string;
+  /** Sellers the viewer has blocked; their listings are left out. */
+  excludeSellerIds?: string[];
   /** Include only publicly listed statuses unless a caller (owner/admin) overrides. */
   publicOnly: boolean;
   offset: number;
@@ -58,6 +64,29 @@ export interface UserRepo {
   findById(id: string): Promise<UserRec | null>;
   findByEmail(email: string): Promise<UserRec | null>;
   update(id: string, patch: Partial<UserRec>): Promise<UserRec | null>;
+}
+
+export interface TokenRepo {
+  addRefresh(r: RefreshRec): Promise<void>;
+  findRefresh(tokenHash: string): Promise<RefreshRec | null>;
+  /** Atomic claim: true only for the caller that moved the token from active to revoked. */
+  revokeRefresh(id: string, at: Date): Promise<boolean>;
+  revokeFamily(familyId: string, at: Date): Promise<void>;
+  revokeAllForUser(userId: string, at: Date): Promise<void>;
+  /** Stores a new code and retires earlier unused codes of the same purpose. */
+  addCode(c: CodeRec): Promise<void>;
+  latestCode(userId: string, purpose: CodePurpose): Promise<CodeRec | null>;
+  /** Counts a wrong guess and returns the new attempt total. */
+  bumpCodeAttempts(id: string): Promise<number>;
+  /** Atomic: true only for the caller that consumed the code. */
+  consumeCode(id: string, at: Date): Promise<boolean>;
+}
+
+export interface BlockRepo {
+  add(blockerId: string, blockedId: string): Promise<void>;
+  remove(blockerId: string, blockedId: string): Promise<boolean>;
+  list(blockerId: string): Promise<BlockRec[]>;
+  blockedIds(blockerId: string): Promise<string[]>;
 }
 
 export interface SavedRepo {
@@ -141,6 +170,8 @@ export interface CountryRepo {
 export interface Repos {
   countries: CountryRepo;
   users: UserRepo;
+  tokens: TokenRepo;
+  blocks: BlockRepo;
   listings: ListingRepo;
   saved: SavedRepo;
   reports: ReportRepo;

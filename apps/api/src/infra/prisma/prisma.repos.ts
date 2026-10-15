@@ -72,6 +72,8 @@ function toUser(r: Row): UserRec {
     countryCode: r.countryCode,
     timeZone: r.timeZone,
     locale: r.locale,
+    emailVerifiedAt: r.emailVerifiedAt ?? null,
+    tokenVersion: r.tokenVersion ?? 0,
     createdAt: r.createdAt,
     prefs: {
       distanceUnit: p?.distanceUnit === 'km' ? 'km' : 'mi',
@@ -296,6 +298,8 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
       }
     }
     if (f.center && f.radiusKm !== undefined) and.push(geoWhere(f.center.lat, f.center.lng, f.radiusKm));
+    // `notIn` alone would also drop listings with no seller (NULL), so keep those explicitly.
+    if (f.excludeSellerIds?.length) and.push({ OR: [{ sellerUserId: null }, { sellerUserId: { notIn: f.excludeSellerIds } }] });
     if (and.length) where.AND = and;
     return where;
   }
@@ -324,6 +328,63 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
       },
     },
 
+    tokens: {
+      async addRefresh(r) {
+        await db.refreshToken.create({ data: { id: r.id, userId: r.userId, familyId: r.familyId, tokenHash: r.tokenHash, expiresAt: r.expiresAt, revokedAt: r.revokedAt, createdAt: r.createdAt } });
+      },
+      async findRefresh(tokenHash) {
+        const r = await db.refreshToken.findUnique({ where: { tokenHash } });
+        return r ? { id: r.id, userId: r.userId, familyId: r.familyId, tokenHash: r.tokenHash, expiresAt: r.expiresAt, revokedAt: r.revokedAt ?? null, createdAt: r.createdAt } : null;
+      },
+      async revokeRefresh(id, at) {
+        // updateMany with revokedAt: null makes the claim atomic: only one concurrent caller sees count 1.
+        const res = await db.refreshToken.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: at } });
+        return res.count === 1;
+      },
+      async revokeFamily(familyId, at) {
+        await db.refreshToken.updateMany({ where: { familyId, revokedAt: null }, data: { revokedAt: at } });
+      },
+      async revokeAllForUser(userId, at) {
+        await db.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } });
+      },
+      async addCode(c) {
+        await db.$transaction([
+          db.oneTimeCode.updateMany({ where: { userId: c.userId, purpose: c.purpose, usedAt: null }, data: { usedAt: c.createdAt } }),
+          db.oneTimeCode.create({ data: { id: c.id, userId: c.userId, purpose: c.purpose, codeHash: c.codeHash, attempts: 0, expiresAt: c.expiresAt, usedAt: null, createdAt: c.createdAt } }),
+        ]);
+      },
+      async latestCode(userId, purpose) {
+        const r = await db.oneTimeCode.findFirst({ where: { userId, purpose }, orderBy: { createdAt: 'desc' } });
+        return r ? { id: r.id, userId: r.userId, purpose: r.purpose, codeHash: r.codeHash, attempts: r.attempts, expiresAt: r.expiresAt, usedAt: r.usedAt ?? null, createdAt: r.createdAt } : null;
+      },
+      async bumpCodeAttempts(id) {
+        const r = await db.oneTimeCode.update({ where: { id }, data: { attempts: { increment: 1 } } });
+        return r.attempts;
+      },
+      async consumeCode(id, at) {
+        const res = await db.oneTimeCode.updateMany({ where: { id, usedAt: null }, data: { usedAt: at } });
+        return res.count === 1;
+      },
+    },
+
+    blocks: {
+      async add(blockerId, blockedId) {
+        await db.userBlock.upsert({ where: { blockerId_blockedId: { blockerId, blockedId } }, create: { blockerId, blockedId }, update: {} });
+      },
+      async remove(blockerId, blockedId) {
+        const res = await db.userBlock.deleteMany({ where: { blockerId, blockedId } });
+        return res.count > 0;
+      },
+      async list(blockerId) {
+        const rows: Row[] = await db.userBlock.findMany({ where: { blockerId }, orderBy: { createdAt: 'desc' } });
+        return rows.map((r) => ({ blockerId: r.blockerId, blockedId: r.blockedId, createdAt: r.createdAt }));
+      },
+      async blockedIds(blockerId) {
+        const rows: Row[] = await db.userBlock.findMany({ where: { blockerId }, select: { blockedId: true } });
+        return rows.map((r) => r.blockedId);
+      },
+    },
+
     users: {
       async insert(u) {
         const row = await db.user.create({
@@ -337,6 +398,8 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
             countryCode: u.countryCode,
             timeZone: u.timeZone,
             locale: u.locale,
+            emailVerifiedAt: u.emailVerifiedAt,
+            tokenVersion: u.tokenVersion,
             pushToken: u.prefs.pushToken,
             createdAt: u.createdAt,
             preference: { create: prefsData(u.prefs) },
@@ -365,6 +428,8 @@ export function createPrismaRepos(prisma: PrismaClient): Repos {
             countryCode: patch.countryCode,
             timeZone: patch.timeZone,
             locale: patch.locale,
+            emailVerifiedAt: patch.emailVerifiedAt,
+            tokenVersion: patch.tokenVersion,
           };
           if (patch.status === 'DELETED') data.deletedAt = new Date();
           if (patch.prefs) {

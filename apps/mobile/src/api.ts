@@ -10,10 +10,25 @@ export class ApiError extends Error {
 
 let getToken: () => string | null = () => null;
 export const setTokenGetter = (fn: () => string | null) => { getToken = fn; };
+/** Called once when a request comes back 401 with a token attached; resolves true if a new session was obtained. */
+let refresher: (() => Promise<boolean>) | null = null;
+export const setRefresher = (fn: () => Promise<boolean>) => { refresher = fn; };
 
 type Query = Record<string, string | number | boolean | undefined | null>;
 
 export async function api<T>(path: string, opts: { method?: string; body?: unknown; query?: Query } = {}): Promise<T> {
+  const sentToken = getToken();
+  try {
+    return await request<T>(path, opts);
+  } catch (e) {
+    // An expired access token is routine: swap the refresh token for a new pair and retry once.
+    // Auth endpoints are excluded so a wrong password or a dead refresh token never loops.
+    if (e instanceof ApiError && e.status === 401 && sentToken && refresher && !path.startsWith('/auth/') && (await refresher())) return request<T>(path, opts);
+    throw e;
+  }
+}
+
+async function request<T>(path: string, opts: { method?: string; body?: unknown; query?: Query } = {}): Promise<T> {
   const qs = opts.query
     ? '?' + Object.entries(opts.query).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
     : '';
@@ -99,6 +114,7 @@ export interface Page<T> { items: T[]; total: number; nextCursor: string | null 
 
 export interface UserView {
   id: string; email: string; displayName: string; role: string; tier: string; countryCode: string; timeZone: string;
+  emailVerified: boolean;
   prefs: { distanceUnit: 'mi' | 'km'; homeLat: number | null; homeLng: number | null; homeLabel: string | null; personalisationEnabled: boolean; pushEnabled: boolean; pushTokenSet: boolean; maxPushPerDay: number };
 }
 

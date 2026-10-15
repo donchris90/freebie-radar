@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setToken, Stats } from './api';
+import { ApiError, api, Appeal, AuditRow, hasToken, Me, ReportRow, setRefreshToken, setToken, signOut, Stats } from './api';
 
-type Tab = 'overview' | 'reports' | 'appeals' | 'countries' | 'audit' | 'jobs';
+type Tab = 'overview' | 'reports' | 'appeals' | 'users' | 'countries' | 'audit' | 'jobs';
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -147,6 +147,52 @@ function Appeals() {
   );
 }
 
+interface UserRow { id: string; email: string; displayName: string; role: string; status: 'ACTIVE' | 'SUSPENDED' | 'DELETED'; emailVerified: boolean; countryCode: string; createdAt: string }
+
+function Users() {
+  const [email, setEmail] = useState('');
+  const [user, setUser] = useState<UserRow | null>(null);
+  const [reason, setReason] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const find = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setMsg(null); setUser(null);
+    try { setUser(await api<UserRow>(`/admin/users?email=${encodeURIComponent(email.trim())}`)); } catch (err) { setMsg((err as Error).message); } finally { setBusy(false); }
+  };
+  const set = async (status: 'ACTIVE' | 'SUSPENDED') => {
+    if (!user) return;
+    if (reason.trim().length < 3) { setMsg('Enter a reason of at least 3 characters. It is recorded in the audit log.'); return; }
+    setBusy(true); setMsg(null);
+    try { setUser(await api<UserRow>(`/admin/users/${user.id}/status`, { body: { status, reason: reason.trim() } })); setReason(''); } catch (err) { setMsg((err as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card">
+      <form className="row inline" onSubmit={find}>
+        <input aria-label="Account email" type="email" placeholder="Find an account by exact email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ maxWidth: 360 }} />
+        <button className="primary" disabled={busy}>Find account</button>
+      </form>
+      {msg ? <p className="err" role="alert">{msg}</p> : null}
+      {user ? (
+        <div className="item">
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <div><strong>{user.displayName}</strong><div className="muted">{user.email} · {user.role.toLowerCase()} · {user.countryCode} · joined {new Date(user.createdAt).toLocaleDateString()}</div></div>
+            <span className="row"><span className={`pill ${user.status === 'ACTIVE' ? 'on' : 'warn'}`}>{user.status.toLowerCase()}</span><span className="pill">{user.emailVerified ? 'email verified' : 'email not verified'}</span></span>
+          </div>
+          {user.status !== 'DELETED' && user.role !== 'ADMIN' ? (
+            <div className="row" style={{ marginTop: 14 }}>
+              <input aria-label="Reason for decision" placeholder="Reason (required, audited)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ maxWidth: 320 }} />
+              {user.status === 'ACTIVE'
+                ? <button className="danger" disabled={busy} onClick={() => set('SUSPENDED')}>Suspend</button>
+                : <button className="primary" disabled={busy} onClick={() => set('ACTIVE')}>Restore access</button>}
+            </div>
+          ) : <p className="muted">{user.role === 'ADMIN' ? 'Admin accounts cannot be suspended here.' : 'This account was deleted by its owner.'}</p>}
+          <p className="muted">Suspending signs the person out everywhere and holds their public listings for review. Restoring access does not republish them; use the moderation queue for that.</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 interface CountryRow { code: string; name: string; currency: string; distanceUnit: string; timeZone: string; enabled: boolean }
 
 function Countries() {
@@ -230,9 +276,9 @@ function Login({ onDone }: { onDone: (me: Me) => void }) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError(null);
     try {
-      const r = await api<{ accessToken: string; user: Me }>('/auth/login', { body: { email, password } });
+      const r = await api<{ accessToken: string; refreshToken: string; user: Me }>('/auth/login', { body: { email, password } });
       if (r.user.role !== 'ADMIN' && r.user.role !== 'MODERATOR') throw new ApiError(403, 'This account does not have moderator or admin access.');
-      setToken(r.accessToken); onDone(r.user);
+      setToken(r.accessToken); setRefreshToken(r.refreshToken); onDone(r.user);
     } catch (err) { setToken(null); setError((err as Error).message); } finally { setBusy(false); }
   };
   return (
@@ -268,7 +314,7 @@ export function App() {
   if (!me) return <Login onDone={(u) => { setMe(u); setTab(u.role === 'ADMIN' ? 'overview' : 'reports'); }} />;
 
   const isAdmin = me.role === 'ADMIN';
-  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['jobs', 'Jobs', isAdmin]];
+  const tabs: [Tab, string, boolean][] = [['overview', 'Overview', isAdmin], ['reports', 'Reports', true], ['appeals', 'Appeals', true], ['users', 'Users', isAdmin], ['countries', 'Countries', isAdmin], ['audit', 'Audit log', isAdmin], ['jobs', 'Jobs', isAdmin]];
   const visible = tabs.filter(([, , show]) => show);
   const current = visible.find(([k]) => k === tab)?.[1] ?? '';
   return (
@@ -279,7 +325,7 @@ export function App() {
         <div className="who">
           <span className="who-name">{me.displayName}</span>
           <span className="who-role">{me.role.toLowerCase()}</span>
-          <button onClick={() => { setToken(null); setMe(null); }}>Sign out</button>
+          <button onClick={() => { void signOut(); setMe(null); }}>Sign out</button>
         </div>
       </aside>
       <main>
@@ -287,6 +333,7 @@ export function App() {
         {tab === 'overview' && isAdmin ? <Overview /> : null}
         {tab === 'reports' ? <Reports /> : null}
         {tab === 'appeals' ? <Appeals /> : null}
+        {tab === 'users' && isAdmin ? <Users /> : null}
         {tab === 'countries' && isAdmin ? <Countries /> : null}
         {tab === 'audit' && isAdmin ? <Audit /> : null}
         {tab === 'jobs' && isAdmin ? <Jobs /> : null}

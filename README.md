@@ -18,6 +18,7 @@ Find the deals before everyone else. A deal-discovery platform: Free Near Me, ex
 | Photo upload (`POST /uploads/images`, sell-screen camera and library picker) | Built and covered by e2e tests with the local-disk driver. Photos are decoded and re-encoded (EXIF/GPS removed, max 1600px JPEG). The S3 driver is written but **never run against a real bucket** |
 | In-app messaging between buyer and seller | Not started. The listing screen says so and offers "Open original listing" only for external-link listings |
 | Countries (`Country` table, admin Countries page, public `GET /countries`) | US, CA and GB open at first; every other catalog country is switched on from the admin dashboard. Covered by e2e tests on the in-memory store; needs migration `countries` on PostgreSQL |
+| Account safety: refresh tokens, change password, forgot/reset password, email verification, blocking sellers, admin suspend | Built; 20 new e2e tests pass **on the in-memory store only**. Needs migration `account_safety` and a `test:pg` run on PostgreSQL before it counts as verified there. Email delivery over SMTP is written against nodemailer's documented API and **never sent through a real provider** (in development the code is printed in the API console) |
 | Payments, promotions, subscriptions | Not implemented. Tier gating exists for alert limits only |
 | Price history and trends | Not implemented (needs the persistence layer to accumulate observations) |
 
@@ -68,7 +69,12 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 | Method and path | Auth | Purpose |
 |---|---|---|
 | `GET /health` | none | Liveness |
-| `POST /auth/register`, `POST /auth/login` | none | Account and token |
+| `POST /auth/register`, `POST /auth/login` | none | Account; returns `accessToken` (15 min) and `refreshToken` |
+| `POST /auth/refresh`, `POST /auth/logout` | none | Rotate a refresh token (single use; replaying a used one ends that whole login) / end one login |
+| `POST /auth/forgot-password`, `POST /auth/reset-password` | none | Emails an 8-character code (30 min, five guesses); reset signs out every device |
+| `POST /auth/logout-everywhere`, `POST /me/password` | user | Sign out all devices; change password (current password required) |
+| `POST /me/email/send-code`, `POST /me/email/verify` | user | Email verification by code. Posting requires it when `REQUIRE_VERIFIED_EMAIL` is on (default in production) |
+| `POST /listings/:id/block-seller`, `GET /me/blocks`, `DELETE /me/blocks/:userId` | user | Hide a seller's listings from your feeds, search, saved list and alerts |
 | `GET /me`, `PATCH /me/preferences`, `DELETE /me` | user | Profile, location and notification prefs, account deletion |
 | `POST /me/personalisation/reset` | user | Reset activity-based personalisation |
 | `GET /listings` | opt | Search: `q, category, freeOnly, minPrice, maxPrice, currency, condition, lat, lng, radius, unit, sort, limit, cursor` |
@@ -88,6 +94,7 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 | `GET /admin/reports`, `POST /admin/reports/:id/resolve`, `POST /admin/listings/:id/moderate`, `GET /admin/appeals`, `POST /admin/appeals/:id/resolve` | moderator, admin | Review queue and decisions (reason required, audited) |
 | `GET /countries` | none | Countries currently open (code, currency, distance unit, time zone) |
 | `GET /admin/countries`, `PATCH /admin/countries/:code` | admin | List the catalog, switch a country on or off (audited; the default country cannot be disabled) |
+| `GET /admin/users?email=`, `POST /admin/users/:id/status` | admin | Find an account; suspend (signs out everywhere, holds listings for review) or restore. Reason required, audited |
 | `GET /admin/stats`, `GET /admin/audit`, `POST /admin/jobs/expire`, `POST /admin/jobs/dispatch-alerts` | admin | Real aggregate counts, audit log, job triggers |
 
 ## Design decisions
@@ -106,7 +113,7 @@ Auth: bearer token from `/auth/login`. "Opt" means optional auth (anonymous allo
 - Photos: no thumbnails yet (feeds load the 1600px image), no cleanup job for uploads never attached to a listing, no per-user storage quota beyond the rate limit (30 uploads per minute). Photos are deleted when an account is deleted. In production use `STORAGE_DRIVER=s3` (S3-compatible: AWS, R2, MinIO) with `S3_PUBLIC_BASE_URL`; local disk needs `PUBLIC_BASE_URL` and persistent storage.
 - Pagination is offset-based in both adapters; move to keyset pagination on `(postedAt, id)` for large feeds. Radius and distance-ordered searches prefilter by bounding box in SQL (capped at 5,000 candidates) and refine in memory; PostGIS is the upgrade path.
 - Deal scores are computed on read from comparable listings; production should cache scores and maintain `ComparablePriceObservation` rows.
-- No refresh-token flow yet (access tokens only), no email verification or password reset, no user-to-user blocking endpoints.
+- Account safety: access tokens last 15 minutes and are ended early by a per-user version counter; refresh tokens last 30 days and rotate on use. Codes are emailed, not sent as links, so no web page or deep link is needed. Blocking is one-way (the blocked person is not told and can still see the blocker's listings). Suspending holds public listings for review; restoring access does not republish them. No two-factor sign-in, no CAPTCHA, and no per-account lockout beyond rate limits and the five-guess cap on codes.
 - The e2e suite has run against PostgreSQL only; nothing has been run against Redis or BullMQ (not wired yet).
 - Mobile: not run on a device. The map uses `react-native-maps` (Android release builds need a Google Maps API key; Expo Go on iOS uses Apple Maps). Push registration needs an Expo `projectId` in `app.json` (`extra.eas.projectId`) and a real device; without it the app says push is not configured instead of pretending.
 - Mobile location: one-shot foreground location on request, or a manually geocoded place. There is no background tracking. Manual geocoding uses the platform geocoder and is unverified.

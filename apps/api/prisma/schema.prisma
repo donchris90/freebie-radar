@@ -165,12 +165,16 @@ model User {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   deletedAt        DateTime?
+  emailVerifiedAt  DateTime?
+  /// Bumped on password change, reset and sign-out-everywhere; access tokens carry the version they were issued under.
+  tokenVersion     Int           @default(0)
 
   preference       UserPreference?
   sellerProfile    SellerProfile?
   businessAccount  BusinessAccount?
   subscription     Subscription?
   refreshTokens    RefreshToken[]
+  oneTimeCodes     OneTimeCode[]
   listings         Listing[]
   savedListings    SavedListing[]
   savedSearches    SavedSearch[]
@@ -191,6 +195,8 @@ model User {
 model RefreshToken {
   id         String    @id @default(uuid())
   userId     String
+  /// Tokens rotate on every use; all tokens from one login share a family so reuse can revoke the lot.
+  familyId   String
   tokenHash  String    @unique
   expiresAt  DateTime
   revokedAt  DateTime?
@@ -198,6 +204,27 @@ model RefreshToken {
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([familyId])
+}
+
+enum CodePurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+/// Short code emailed to a user. Only a hash is stored; wrong guesses are counted and capped.
+model OneTimeCode {
+  id        String      @id @default(uuid())
+  userId    String
+  purpose   CodePurpose
+  codeHash  String
+  attempts  Int         @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
 }
 
 model UserPreference {

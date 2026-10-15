@@ -41,6 +41,37 @@ export interface UserRec {
   timeZone: string;
   locale: string;
   prefs: UserPrefs;
+  emailVerifiedAt: Date | null;
+  /** Bumped to invalidate every access token issued earlier. */
+  tokenVersion: number;
+  createdAt: Date;
+}
+
+export interface RefreshRec {
+  id: string;
+  userId: string;
+  familyId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+export type CodePurpose = 'EMAIL_VERIFY' | 'PASSWORD_RESET';
+export interface CodeRec {
+  id: string;
+  userId: string;
+  purpose: CodePurpose;
+  codeHash: string;
+  attempts: number;
+  expiresAt: Date;
+  usedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface BlockRec {
+  blockerId: string;
+  blockedId: string;
   createdAt: Date;
 }
 

@@ -38,6 +38,16 @@ export interface AppConfig {
   uploadDir: string;
   /** Public origin used in photo URLs for the local driver. Falls back to the request's own origin. */
   publicBaseUrl: string | null;
+  /** Refresh tokens last this long; each use rotates them. */
+  refreshTtlDays: number;
+  /** A refresh token reused within this many seconds of being used counts as a race, not theft. */
+  refreshReuseGraceSeconds: number;
+  /** Minimum gap between emailed codes for one account and purpose. */
+  codeResendSeconds: number;
+  /** Email delivery. `log` prints messages to the console and is refused in production. */
+  mail: { driver: 'log' | 'smtp'; from: string; smtpUrl: string | null };
+  /** When true, only accounts with a verified email can post listings. Defaults to on in production. */
+  requireVerifiedEmail: boolean;
   s3: null | { bucket: string; region: string; accessKeyId: string; secretAccessKey: string; publicBaseUrl: string; endpoint: string | null };
 }
 
@@ -64,6 +74,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (nodeEnv === 'production' && driver === 'local' && !env.PUBLIC_BASE_URL) {
     throw new Error('PUBLIC_BASE_URL is required in production when STORAGE_DRIVER=local (and local disk must be persistent)');
   }
+  const mailDriver = (env.MAIL_DRIVER ?? (env.SMTP_URL ? 'smtp' : 'log')).toLowerCase();
+  if (mailDriver !== 'log' && mailDriver !== 'smtp') throw new Error('MAIL_DRIVER must be "log" or "smtp"');
+  if (mailDriver === 'smtp' && !env.SMTP_URL) throw new Error('MAIL_DRIVER=smtp requires SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465)');
+  if (nodeEnv === 'production' && mailDriver !== 'smtp') {
+    throw new Error('Production needs real email delivery: set SMTP_URL and MAIL_FROM (password reset and verification depend on it)');
+  }
+  if (nodeEnv === 'production' && !env.MAIL_FROM) throw new Error('MAIL_FROM is required in production');
   const list = (v: string | undefined, d: string[]) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
   return {
     nodeEnv,
@@ -81,6 +98,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     storageDriver: driver,
     uploadDir: env.UPLOAD_DIR ?? resolve(process.cwd(), 'uploads'),
     publicBaseUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/$/, '') : null,
+    refreshTtlDays: int(env.REFRESH_TTL_DAYS, 30),
+    refreshReuseGraceSeconds: int(env.REFRESH_REUSE_GRACE_SECONDS, 10),
+    codeResendSeconds: int(env.CODE_RESEND_SECONDS, 60),
+    mail: { driver: mailDriver, from: env.MAIL_FROM ?? 'Freebie Radar <no-reply@localhost>', smtpUrl: env.SMTP_URL ?? null },
+    requireVerifiedEmail: env.REQUIRE_VERIFIED_EMAIL ? env.REQUIRE_VERIFIED_EMAIL === 'true' : nodeEnv === 'production',
     s3,
   };
 }

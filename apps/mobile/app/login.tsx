@@ -23,6 +23,7 @@ export default function Login() {
       <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" />
       {error ? <Text accessibilityLiveRegion="polite" style={[type.body, { color: colors.danger }]}>{error}</Text> : null}
       <Button title="Sign in" busy={busy} disabled={!email || !password} onPress={submit} />
+      <Link href="/forgot-password" style={[type.body, { color: colors.accent, textAlign: 'center', fontFamily: 'DMSans_700Bold' }]}>Forgot your password?</Link>
       <Link href="/register" replace style={[type.body, { color: colors.accent, textAlign: 'center', fontFamily: 'DMSans_700Bold' }]}>New here? Create an account</Link>
     </ScrollView>
   );

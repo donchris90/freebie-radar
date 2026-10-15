@@ -45,6 +45,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 input, textarea { font:inherit; padding:11px 14px; border:1.5px solid var(--line); border-radius:12px; width:100%; background:#fff; color:var(--ink); }
 input:focus { border-color:var(--accent); }
 label { display:grid; gap:6px; font-size:13px; color:var(--muted); font-weight:700; }
+.row.inline { margin-bottom:6px; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 
 /* surfaces */

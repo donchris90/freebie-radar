@@ -4,6 +4,8 @@ import sharp from 'sharp';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PRISMA, PUSH_SENDER, REPOS, Repos, PushMessage } from '../src/domain/ports';
+import { APP_CONFIG, AppConfig } from '../src/config/config';
+import { MAILER, MailMessage } from '../src/mail/mailer';
 import { resetTestDatabase } from '../src/infra/prisma/prisma.repos';
 import { AlertsService } from '../src/engagement/alerts';
 import { configureApp } from '../src/main';
@@ -20,22 +22,37 @@ function fakePush() {
   };
 }
 
+function fakeMail() {
+  const sent: MailMessage[] = [];
+  return {
+    sent,
+    send: async (m: MailMessage) => { sent.push(m); },
+    /** The most recent code emailed to an address, e.g. "ABCD-2345". */
+    lastCode(to: string): string | null {
+      const m = [...sent].reverse().find((x) => x.to === to);
+      return m?.text.match(/Your code: ([A-Z0-9]{4}-[A-Z0-9]{4})/)?.[1] ?? null;
+    },
+    countTo: (to: string) => sent.filter((x) => x.to === to).length,
+  };
+}
+
 async function boot() {
   const push = fakePush();
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(PUSH_SENDER).useValue(push).compile();
+  const mail = fakeMail();
+  const mod = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(PUSH_SENDER).useValue(push).overrideProvider(MAILER).useValue(mail).compile();
   const prisma = mod.get(PRISMA, { strict: false });
   if (prisma) await resetTestDatabase(prisma); // Postgres runs start from empty tables
   const app = mod.createNestApplication();
   configureApp(app);
   await app.init();
-  return { app, push, repos: app.get<Repos>(REPOS), alerts: app.get(AlertsService) };
+  return { app, push, mail, cfg: app.get<AppConfig>(APP_CONFIG), repos: app.get<Repos>(REPOS), alerts: app.get(AlertsService) };
 }
 
 async function signup(app: INestApplication, over: Record<string, unknown> = {}) {
   const email = `u${uniq()}@example.com`;
   const res = await request(app.getHttpServer()).post('/auth/register').send({ email, password: 'correct-horse-battery', displayName: 'Tester', ...over });
   expect(res.status).toBe(201);
-  return { token: res.body.accessToken as string, id: res.body.user.id as string, email };
+  return { token: res.body.accessToken as string, refresh: res.body.refreshToken as string, id: res.body.user.id as string, email };
 }
 const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
 
@@ -745,6 +762,288 @@ describe('Freebie Radar API', () => {
       await http().get(pathOf(url)).expect(200);
       await http().delete('/me').set(bearer(u.token)).expect(200);
       await http().get(pathOf(url)).expect(404);
+    });
+  });
+
+  describe('account safety', () => {
+    const NEW_PW = 'a-brand-new-passphrase';
+    const OLD_PW = 'correct-horse-battery';
+    const code = (email: string) => ctx.mail.lastCode(email)!;
+
+    describe('refresh tokens', () => {
+      it('issues a refresh token at sign-up and sign-in, rotates it, and rejects the used one', async () => {
+        const u = await signup(app);
+        expect(u.refresh).toBeTruthy();
+        const login = await http().post('/auth/login').send({ email: u.email, password: OLD_PW }).expect(201);
+        expect(login.body.refreshToken).toBeTruthy();
+        const r1 = login.body.refreshToken as string;
+        const next = await http().post('/auth/refresh').send({ refreshToken: r1 }).expect(201);
+        expect(next.body.refreshToken).not.toBe(r1);
+        expect((await http().get('/me').set(bearer(next.body.accessToken))).status).toBe(200);
+        expect((await http().post('/auth/refresh').send({ refreshToken: r1 })).status).toBe(401);
+      });
+
+      it('treats reuse of a rotated token as theft and ends the whole session family', async () => {
+        const u = await signup(app);
+        const second = await http().post('/auth/refresh').send({ refreshToken: u.refresh }).expect(201);
+        expect((await http().post('/auth/refresh').send({ refreshToken: u.refresh })).status).toBe(401); // replay
+        // The legitimate newest token is now dead too: the thief and the owner both have to sign in again.
+        expect((await http().post('/auth/refresh').send({ refreshToken: second.body.refreshToken })).status).toBe(401);
+      });
+
+      it('never accepts a made-up or malformed token, and does not store tokens in plain text', async () => {
+        expect((await http().post('/auth/refresh').send({ refreshToken: 'x'.repeat(43) })).status).toBe(401);
+        expect((await http().post('/auth/refresh').send({ refreshToken: 'short' })).status).toBe(400);
+        const u = await signup(app);
+        expect(await ctx.repos.tokens.findRefresh(u.refresh)).toBeNull(); // only the hash is stored
+      });
+
+      it('logout ends that session only; logout-everywhere ends all of them and the access token', async () => {
+        const u = await signup(app);
+        const other = (await http().post('/auth/login').send({ email: u.email, password: OLD_PW }).expect(201)).body;
+        await http().post('/auth/logout').send({ refreshToken: u.refresh }).expect(201);
+        expect((await http().post('/auth/refresh').send({ refreshToken: u.refresh })).status).toBe(401);
+        expect((await http().post('/auth/refresh').send({ refreshToken: other.refreshToken })).status).toBe(201);
+        await http().post('/auth/logout').send({ refreshToken: 'unknown-token-unknown-token' }).expect(201); // always succeeds
+
+        const again = (await http().post('/auth/login').send({ email: u.email, password: OLD_PW }).expect(201)).body;
+        await http().post('/auth/logout-everywhere').set(bearer(again.accessToken)).expect(201);
+        expect((await http().get('/me').set(bearer(again.accessToken))).status).toBe(401);
+        expect((await http().post('/auth/refresh').send({ refreshToken: again.refreshToken })).status).toBe(401);
+      });
+    });
+
+    describe('change password', () => {
+      it('requires the current password, ends other sessions, and keeps this device signed in', async () => {
+        const u = await signup(app);
+        const wrong = await http().post('/me/password').set(bearer(u.token)).send({ currentPassword: 'not-my-password', newPassword: NEW_PW });
+        expect(wrong.status).toBe(403);
+        expect((await http().post('/me/password').set(bearer(u.token)).send({ currentPassword: OLD_PW, newPassword: OLD_PW })).status).toBe(400);
+        expect((await http().post('/me/password').set(bearer(u.token)).send({ currentPassword: OLD_PW, newPassword: 'short' })).status).toBe(400);
+
+        const ok = await http().post('/me/password').set(bearer(u.token)).send({ currentPassword: OLD_PW, newPassword: NEW_PW }).expect(201);
+        expect((await http().get('/me').set(bearer(u.token))).status).toBe(401); // the old access token is dead
+        expect((await http().post('/auth/refresh').send({ refreshToken: u.refresh })).status).toBe(401);
+        expect((await http().get('/me').set(bearer(ok.body.accessToken))).status).toBe(200); // this device continues
+        expect((await http().post('/auth/login').send({ email: u.email, password: OLD_PW })).status).toBe(401);
+        expect((await http().post('/auth/login').send({ email: u.email, password: NEW_PW })).status).toBe(201);
+        expect(JSON.stringify(ok.body)).not.toMatch(/passwordHash|\$2[aby]\$/);
+      });
+    });
+
+    describe('forgot and reset password', () => {
+      it('gives the same answer for unknown and known emails, and only emails real accounts', async () => {
+        const u = await signup(app);
+        const before = ctx.mail.countTo(u.email);
+        const known = await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        const ghost = `ghost${uniq()}@example.com`;
+        const unknown = await http().post('/auth/forgot-password').send({ email: ghost }).expect(201);
+        expect(unknown.body).toEqual(known.body);
+        expect(ctx.mail.countTo(ghost)).toBe(0);
+        expect(ctx.mail.countTo(u.email)).toBe(before + 1);
+      });
+
+      it('resets with the emailed code, signs everything out, and the code works once', async () => {
+        const u = await signup(app);
+        await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        const c = code(u.email);
+        expect((await http().post('/auth/reset-password').send({ email: u.email, code: 'WRONG-CODE', newPassword: NEW_PW })).status).toBe(400);
+        await http().post('/auth/reset-password').send({ email: u.email, code: c.toLowerCase().replace('-', ' '), newPassword: NEW_PW }).expect(201); // forgiving about case and spacing
+        expect((await http().post('/auth/reset-password').send({ email: u.email, code: c, newPassword: 'another-new-passphrase' })).status).toBe(400); // single use
+        expect((await http().get('/me').set(bearer(u.token))).status).toBe(401);
+        expect((await http().post('/auth/refresh').send({ refreshToken: u.refresh })).status).toBe(401);
+        expect((await http().post('/auth/login').send({ email: u.email, password: OLD_PW })).status).toBe(401);
+        expect((await http().post('/auth/login').send({ email: u.email, password: NEW_PW })).status).toBe(201);
+        const fresh = await http().post('/auth/login').send({ email: u.email, password: NEW_PW });
+        const me = await http().get('/me').set(bearer(fresh.body.accessToken));
+        expect(me.body.emailVerified).toBe(true); // receiving the code proves the address
+      });
+
+      it('locks a code after five wrong guesses, even if the right one is then supplied', async () => {
+        const u = await signup(app);
+        await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        const c = code(u.email);
+        for (let i = 0; i < 5; i++) {
+          expect((await http().post('/auth/reset-password').send({ email: u.email, code: 'AAAA-AAAA', newPassword: NEW_PW })).status).toBe(400);
+        }
+        expect((await http().post('/auth/reset-password').send({ email: u.email, code: c, newPassword: NEW_PW })).status).toBe(400);
+        // A fresh code is the way out, and it works.
+        await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        expect(code(u.email)).not.toBe(c);
+        await http().post('/auth/reset-password').send({ email: u.email, code: code(u.email), newPassword: NEW_PW }).expect(201);
+      });
+
+      it('expires codes, and a newer code replaces the older one', async () => {
+        const u = await signup(app);
+        await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        const first = code(u.email);
+        await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        const second = code(u.email);
+        expect(second).not.toBe(first);
+        expect((await http().post('/auth/reset-password').send({ email: u.email, code: first, newPassword: NEW_PW })).status).toBe(400);
+        // Thirty-one minutes later the code has expired (only the code check reads the clock in this request).
+        const real = Date.now;
+        Date.now = () => real() + 31 * 60_000;
+        try {
+          expect((await http().post('/auth/reset-password').send({ email: u.email, code: second, newPassword: NEW_PW })).status).toBe(400);
+        } finally { Date.now = real; }
+        await http().post('/auth/reset-password').send({ email: u.email, code: second, newPassword: NEW_PW }).expect(201); // and it was not consumed by the failed attempt
+      });
+
+      it('rate-limits how often a code can be requested', async () => {
+        const u = await signup(app);
+        ctx.cfg.codeResendSeconds = 60;
+        try {
+          await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+          const n = ctx.mail.countTo(u.email);
+          await http().post('/auth/forgot-password').send({ email: u.email }).expect(201); // same answer, no second email
+          expect(ctx.mail.countTo(u.email)).toBe(n);
+        } finally { ctx.cfg.codeResendSeconds = 0; }
+      });
+
+      it('does not let a suspended or deleted account reset its password', async () => {
+        const u = await signup(app);
+        await ctx.repos.users.update(u.id, { status: 'SUSPENDED' });
+        const n = ctx.mail.countTo(u.email);
+        await http().post('/auth/forgot-password').send({ email: u.email }).expect(201);
+        expect(ctx.mail.countTo(u.email)).toBe(n);
+      });
+    });
+
+    describe('email verification', () => {
+      it('sends a code at sign-up and verifies with it', async () => {
+        const u = await signup(app);
+        expect((await http().get('/me').set(bearer(u.token))).body.emailVerified).toBe(false);
+        expect((await http().post('/me/email/verify').set(bearer(u.token)).send({ code: 'ZZZZ-ZZZZ' })).status).toBe(400);
+        const ok = await http().post('/me/email/verify').set(bearer(u.token)).send({ code: code(u.email) }).expect(201);
+        expect(ok.body.verified).toBe(true);
+        expect((await http().get('/me').set(bearer(u.token))).body.emailVerified).toBe(true);
+        expect((await http().post('/me/email/send-code').set(bearer(u.token)).expect(201)).body.verified).toBe(true); // nothing more to do
+      });
+
+      it('can resend, but not more than once a minute', async () => {
+        const u = await signup(app);
+        ctx.cfg.codeResendSeconds = 60;
+        try { expect((await http().post('/me/email/send-code').set(bearer(u.token))).status).toBe(429); } finally { ctx.cfg.codeResendSeconds = 0; }
+        await http().post('/me/email/send-code').set(bearer(u.token)).expect(201);
+        await http().post('/me/email/verify').set(bearer(u.token)).send({ code: code(u.email) }).expect(201);
+      });
+
+      it('gates posting on a verified email only when the setting is on', async () => {
+        const u = await signup(app);
+        ctx.cfg.requireVerifiedEmail = true;
+        try {
+          const blocked = await http().post('/listings').set(bearer(u.token)).send(payload());
+          expect(blocked.status).toBe(403);
+          expect(blocked.body.message).toMatch(/verify your email/i);
+          await http().post('/me/email/verify').set(bearer(u.token)).send({ code: code(u.email) }).expect(201);
+          expect((await http().post('/listings').set(bearer(u.token)).send(payload())).status).toBe(201);
+        } finally { ctx.cfg.requireVerifiedEmail = false; }
+      });
+    });
+
+    describe('blocking sellers', () => {
+      it('hides a blocked seller everywhere for the blocker only, and unblocking brings them back', async () => {
+        const seller = await signup(app);
+        const viewer = await signup(app);
+        const bystander = await signup(app);
+        const tag = `Blockable${uniq()}`;
+        const l = await makeListing(app, seller.token, { title: `${tag} lamp` });
+        const find = async (t: string) => (await http().get('/listings').query({ q: tag }).set(bearer(t))).body.items.length;
+        expect(await find(viewer.token)).toBe(1);
+
+        await http().post(`/listings/${l.id}/block-seller`).set(bearer(viewer.token)).expect(201);
+        expect(await find(viewer.token)).toBe(0);
+        expect((await http().get(`/listings/${l.id}`).set(bearer(viewer.token))).status).toBe(404);
+        expect(await find(bystander.token)).toBe(1); // nobody else is affected
+        expect((await http().get(`/listings/${l.id}`).set(bearer(seller.token))).status).toBe(200);
+
+        const list = await http().get('/me/blocks').set(bearer(viewer.token)).expect(200);
+        expect(list.body.items).toEqual([expect.objectContaining({ userId: seller.id, displayName: 'Tester' })]);
+        expect(JSON.stringify(list.body)).not.toMatch(/@example\.com/); // no email of the blocked person
+        await http().post(`/listings/${l.id}/block-seller`).set(bearer(viewer.token)).expect(201); // idempotent
+
+        await http().delete(`/me/blocks/${seller.id}`).set(bearer(viewer.token)).expect(200);
+        expect((await http().delete(`/me/blocks/${seller.id}`).set(bearer(viewer.token))).status).toBe(404);
+        expect(await find(viewer.token)).toBe(1);
+      });
+
+      it('cannot block yourself or a missing listing, and needs sign-in', async () => {
+        const seller = await signup(app);
+        const l = await makeListing(app, seller.token);
+        expect((await http().post(`/listings/${l.id}/block-seller`).set(bearer(seller.token))).status).toBe(400);
+        expect((await http().post('/listings/00000000-0000-0000-0000-000000000000/block-seller').set(bearer(seller.token))).status).toBe(404);
+        expect((await http().post(`/listings/${l.id}/block-seller`)).status).toBe(401);
+      });
+
+      it('stops alerts for a blocked seller', async () => {
+        const buyer = await signup(app, { timeZone: 'UTC' });
+        await http().patch('/me/preferences').set(bearer(buyer.token)).send({ pushToken: 'ExpoPushToken[blk]' }).expect(200);
+        await http().post('/alerts').set(bearer(buyer.token)).send({ name: 'Blk', keywords: ['bluelamp'], maxPriceMinor: 25000, currency: 'USD', radiusKm: 16, centerLat: 40.73, centerLng: -73.99 }).expect(201);
+        const seller = await signup(app);
+        const first = await makeListing(app, seller.token, { title: `bluelamp first ${uniq()}`, price: '20', lat: 40.73, lng: -73.99 });
+        const sent = ctx.push.sent.length;
+        await http().post(`/listings/${first.id}/block-seller`).set(bearer(buyer.token)).expect(201);
+        await makeListing(app, seller.token, { title: `bluelamp second ${uniq()}`, price: '20', lat: 40.73, lng: -73.99 });
+        expect(ctx.push.sent.length).toBe(sent);
+      });
+    });
+
+    describe('admin suspension', () => {
+      it('suspends: signs the person out everywhere, holds their listings, blocks sign-in; restore lets them back', async () => {
+        const admin = await signup(app);
+        await ctx.repos.users.update(admin.id, { role: 'ADMIN' });
+        const target = await signup(app);
+        const tag = `Suspendable${uniq()}`;
+        const l = await makeListing(app, target.token, { title: `${tag} chair` });
+        expect((await http().get('/listings').query({ q: tag })).body.total).toBe(1);
+
+        const found = await http().get('/admin/users').query({ email: target.email.toUpperCase() }).set(bearer(admin.token)).expect(200);
+        expect(found.body).toMatchObject({ id: target.id, status: 'ACTIVE', emailVerified: false });
+        expect(JSON.stringify(found.body)).not.toMatch(/passwordHash/);
+
+        expect((await http().post(`/admin/users/${target.id}/status`).set(bearer(admin.token)).send({ status: 'SUSPENDED', reason: 'x' })).status).toBe(400); // reason too short
+        const r = await http().post(`/admin/users/${target.id}/status`).set(bearer(admin.token)).send({ status: 'SUSPENDED', reason: 'Repeated scam reports' }).expect(201);
+        expect(r.body.status).toBe('SUSPENDED');
+        expect((await http().get('/me').set(bearer(target.token))).status).toBe(401);
+        expect((await http().post('/auth/refresh').send({ refreshToken: target.refresh })).status).toBe(401);
+        const login = await http().post('/auth/login').send({ email: target.email, password: OLD_PW });
+        expect(login.status).toBe(403);
+        expect(login.body.message).toMatch(/suspended/i);
+        expect((await http().post('/auth/login').send({ email: target.email, password: 'wrong-password-here' })).status).toBe(401); // no hint without the right password
+        expect((await http().get('/listings').query({ q: tag })).body.total).toBe(0);
+        expect((await ctx.repos.listings.findById(l.id))!.status).toBe('UNDER_REVIEW');
+
+        const audit = await http().get('/admin/audit').set(bearer(admin.token)).expect(200);
+        expect(audit.body.items.some((a: { action: string; entityId: string }) => a.action === 'USER_SUSPENDED' && a.entityId === target.id)).toBe(true);
+
+        await http().post(`/admin/users/${target.id}/status`).set(bearer(admin.token)).send({ status: 'ACTIVE', reason: 'Appeal accepted' }).expect(201);
+        expect((await http().post('/auth/login').send({ email: target.email, password: OLD_PW })).status).toBe(201);
+        expect((await ctx.repos.listings.findById(l.id))!.status).toBe('UNDER_REVIEW'); // moderators decide on republishing
+      });
+
+      it('is admin-only and refuses to suspend yourself or another admin', async () => {
+        const admin = await signup(app);
+        await ctx.repos.users.update(admin.id, { role: 'ADMIN' });
+        const other = await signup(app);
+        await ctx.repos.users.update(other.id, { role: 'ADMIN' });
+        const mod = await signup(app);
+        await ctx.repos.users.update(mod.id, { role: 'MODERATOR' });
+        const plain = await signup(app);
+        const body = { status: 'SUSPENDED', reason: 'testing rules' };
+        expect((await http().post(`/admin/users/${admin.id}/status`).set(bearer(admin.token)).send(body)).status).toBe(403);
+        expect((await http().post(`/admin/users/${other.id}/status`).set(bearer(admin.token)).send(body)).status).toBe(403);
+        expect((await http().post(`/admin/users/${plain.id}/status`).set(bearer(mod.token)).send(body)).status).toBe(403);
+        expect((await http().get('/admin/users').query({ email: plain.email }).set(bearer(mod.token))).status).toBe(403);
+        expect((await http().get('/admin/users').query({ email: plain.email }).set(bearer(plain.token))).status).toBe(403);
+        expect((await http().get('/admin/users').query({ email: 'nobody@example.com' }).set(bearer(admin.token))).status).toBe(404);
+      });
+    });
+
+    it('account deletion ends every session', async () => {
+      const u = await signup(app);
+      await http().delete('/me').set(bearer(u.token)).expect(200);
+      expect((await http().post('/auth/refresh').send({ refreshToken: u.refresh })).status).toBe(401);
     });
   });
 });

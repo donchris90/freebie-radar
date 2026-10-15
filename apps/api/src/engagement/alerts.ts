@@ -197,6 +197,7 @@ export class AlertsService {
       let user = users.get(a.userId);
       if (user === undefined) { user = await this.repos.users.findById(a.userId); users.set(a.userId, user); }
       if (!user || user.status !== 'ACTIVE') continue;
+      if (l.sellerUserId && (await this.repos.blocks.blockedIds(user.id)).includes(l.sellerUserId)) continue; // they blocked this seller
       result.matched++;
 
       const delivery = await this.repos.alerts.recordDelivery({ id: randomUUID(), alertId: a.id, listingId: l.id, status: 'PENDING', reason: null, createdAt: now });
